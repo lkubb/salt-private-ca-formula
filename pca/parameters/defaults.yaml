@@ -1,0 +1,23 @@
+# -*- coding: utf-8 -*-
+# vim: ft=yaml
+#
+# Set default values.
+---
+values:
+  lookup:
+    rootgroup: root
+    pkg:
+      name: python3-m2crypto
+    ca_bundle_path: /etc/pki/ca-trust/source/anchors
+    ca_bundle_update_cmd: update-ca-trust
+    pki_dir: /etc/pki
+  ca:
+    bitlength: 4096
+    extra_info: {}
+    name: ''
+    self_signed: true
+    self_signed_valid: 3655
+  # Just here for testing
+  added_in_defaults: defaults_value
+  winner: defaults
+...

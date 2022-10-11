@@ -1,0 +1,46 @@
+{
+  "template": "https://github.com/lkubb/salt-template-formula",
+  "commit": "63b1c0066d38bfe946a650abeda910522638d427",
+  "checkout": null,
+  "context": {
+    "cookiecutter": {
+      "_extensions": [
+        "local_extensions.YAMLDumper"
+      ],
+      "_jinja2_env_vars": {
+        "block_start_string": "{!",
+        "block_end_string": "!}",
+        "variable_start_string": "{=",
+        "variable_end_string": "=}",
+        "comment_start_string": "{@",
+        "comment_end_string": "@}"
+      },
+      "name": "Private CA",
+      "abbr": "pca",
+      "abbr_pysafe": "pca",
+      "pkg": "python3-m2crypto",
+      "needs_repo": "",
+      "config": "",
+      "service": "",
+      "subcomponent": "",
+      "subcomponent_config": "",
+      "git_username": "lkubb",
+      "_lookup": {
+        "pki_dir": "/etc/pki",
+        "ca_bundle_path": "/etc/pki/ca-trust/source/anchors",
+        "ca_bundle_update_cmd": "update-ca-trust"
+      },
+      "_settings": {
+        "ca": {
+          "bitlength": 4096,
+          "extra_info": {},
+          "name": "",
+          "self_signed": true,
+          "self_signed_valid": 3655
+        }
+      },
+      "_template": "https://github.com/lkubb/salt-template-formula"
+    }
+  },
+  "directory": null
+}
