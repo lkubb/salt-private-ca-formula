@@ -91,6 +91,15 @@ Publish CA root certificate to the mine:
     - onchanges:
       - x509: {{ pca.lookup.pki_dir | path_join("salt_ca.crt" if pca.ca.self_signed else "salt_ca_root.crt") }}
 
+{%- if not pca.ca.self_signed %}
+
+Publish CA intermediate certificate to the mine:
+  module.run:
+    - mine.send:
+      - name: salt_ca_intermediate
+      - mine_function: x509.get_pem_entries
+      - glob_path: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
+{%- endif %}
 # This intentionally does not manage minion config
 # (x509_signing_policies/mine_functions)
 # x509_signing_policies can be set in pillar
