@@ -19,9 +19,10 @@ Ensure CA certs dir exists with correct perms:
       - sls: {{ sls_base }}
 
 Manage CA singing key:
-  x509.private_key_managed:
+  x509_v2.private_key_managed:
     - name: {{ pca.lookup.pki_dir | path_join("salt_ca.key") }}
-    - bits: {{ pca.ca.bitlength }}
+    - algo: {{ pca.ca.key_algo }}
+    - keysize: {{ pca.ca.keysize if pca.ca.key_algo in ["rsa", "ec"] else "null" }}
     - user: root
     - group: {{ pca.lookup.rootgroup }}
     - mode: '0400'
@@ -31,14 +32,14 @@ Manage CA singing key:
 {%- if pca.ca.self_signed %}
 
 Manage self-signed root CA cert:
-  x509.certificate_managed:
+  x509_v2.certificate_managed:
     - name: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
     - signing_private_key: {{ pca.lookup.pki_dir | path_join("salt_ca.key") }}
     - CN: {{ pca.ca.name or grains["id"] }}
-    - basicConstraints: "critical CA:true"
-    - keyUsage: "critical cRLSign, keyCertSign"
+    - basicConstraints: "critical, CA:true"
+    - keyUsage: "critical, cRLSign, keyCertSign"
     - subjectKeyIdentifier: hash
-    - authorityKeyIdentifier: keyid,issuer:always
+    - authorityKeyIdentifier: keyid:always
     - days_valid: {{ pca.ca.self_signed_valid }}
     - days_remaining: 0
 {%-   for var, val in pca.ca.extra_info.items() %}
@@ -51,16 +52,16 @@ Manage self-signed root CA cert:
     - name: {{ pca.lookup.pki_dir | path_join("salt_ca_root.crt") }}
     - target: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
     - require:
-      - x509: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
+      - x509_v2: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
 {%- else %}
 
 Manage certificate signing request for intermediate CA:
-  x509.csr_managed:
+  x509_v2.csr_managed:
     - name: {{ pca.lookup.pki_dir | path_join("salt_ca.csr") }}
     - private_key: {{ pca.lookup.pki_dir | path_join("salt_ca.key") }}
     - CN: {{ pca.ca.name or grains["id"] }}
-    - basicConstraints: "critical CA:true"
-    - keyUsage: "critical cRLSign, keyCertSign"
+    - basicConstraints: "critical, CA:true"
+    - keyUsage: "critical, cRLSign, keyCertSign"
     - subjectKeyIdentifier: hash
 {%-   for var, val in pca.ca.extra_info.items() %}
     - {{ var }}: {{ val }}
@@ -70,7 +71,7 @@ Manage certificate signing request for intermediate CA:
 
 CA root cert is managed:
   # this does not need to ensure trust, only keep track of the root cert
-  x509.pem_managed:
+  x509_v2.pem_managed:
     - name: {{ pca.lookup.pki_dir | path_join("salt_ca_root.crt") }}
     - text: {{ pca.ca.root_crt | json }}
     - makedirs: True
@@ -89,7 +90,7 @@ Publish CA root certificate to the mine:
       - mine_function: x509.get_pem_entries
       - glob_path: {{ pca.lookup.pki_dir | path_join("salt_ca_root.crt") }}
     - onchanges:
-      - x509: {{ pca.lookup.pki_dir | path_join("salt_ca.crt" if pca.ca.self_signed else "salt_ca_root.crt") }}
+      - x509_v2: {{ pca.lookup.pki_dir | path_join("salt_ca.crt" if pca.ca.self_signed else "salt_ca_root.crt") }}
 
 {%- if not pca.ca.self_signed %}
 

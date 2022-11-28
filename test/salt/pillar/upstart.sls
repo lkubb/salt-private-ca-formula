@@ -9,13 +9,18 @@ pca:
     added_in_lookup: lookup_value
     ca_bundle_path: /etc/pki/ca-trust/source/anchors
     ca_bundle_update_cmd: update-ca-trust
+    pip:
+      cryptography: cryptography
+      pkg: python-pip
     pki_dir: /etc/pki
   ca:
-    bitlength: 4096
     extra_info: {}
+    key_algo: rsa
+    keysize: 4096
     name: ''
     self_signed: true
     self_signed_valid: 3655
+  upgrade_cryptography: false
 
   tofs:
     # The files_switch key serves as a selector for alternative

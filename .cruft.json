@@ -18,7 +18,7 @@
       "name": "Private CA",
       "abbr": "pca",
       "abbr_pysafe": "pca",
-      "pkg": "python3-m2crypto",
+      "pkg": "python-cryptography",
       "needs_repo": "",
       "config": "",
       "service": "",
@@ -28,16 +28,22 @@
       "_lookup": {
         "pki_dir": "/etc/pki",
         "ca_bundle_path": "/etc/pki/ca-trust/source/anchors",
-        "ca_bundle_update_cmd": "update-ca-trust"
+        "ca_bundle_update_cmd": "update-ca-trust",
+        "pip": {
+          "pkg": "python-pip",
+          "cryptography": "cryptography"
+        }
       },
       "_settings": {
         "ca": {
-          "bitlength": 4096,
+          "key_algo": "rsa",
+          "keysize": 4096,
           "extra_info": {},
           "name": "",
           "self_signed": true,
           "self_signed_valid": 3655
-        }
+        },
+        "upgrade_cryptography": false
       },
       "_template": "https://github.com/lkubb/salt-template-formula"
     }

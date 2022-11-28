@@ -5,15 +5,20 @@
 pca:
 
   ca:
-    bitlength: 4096
     extra_info: {}
+    key_algo: rsa
+    keysize: 4096
     name: ''
     self_signed: true
     self_signed_valid: 3655
+  upgrade_cryptography: false
 
   lookup:
     ca_bundle_path: /etc/pki/ca-trust/source/anchors
     ca_bundle_update_cmd: update-ca-trust
+    pip:
+      cryptography: cryptography
+      pkg: python-pip
     pki_dir: /etc/pki
 
   tofs:

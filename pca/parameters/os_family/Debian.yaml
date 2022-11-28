@@ -16,4 +16,8 @@ values:
     pkg_manager: apt
     ca_bundle_path: /usr/local/share/ca-certificates
     ca_bundle_update_cmd: update-ca-certificates --fresh
+    pkg:
+      name: python3-cryptography
+    pip:
+      pkg: python3-pip
 ...
