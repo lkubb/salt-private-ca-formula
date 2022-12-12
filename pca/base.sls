@@ -6,7 +6,7 @@
 
 {%- set ca_root = (salt["mine.get"](pca.ca.minion_id, "salt_ca_root").get(pca.ca.minion_id, {}).values() | list or [false]) | first %}
 
-Install prerequisites for x509_v2 module:
+Install prerequisites for x509 module:
   pkg.installed:
     - name: {{ pca.lookup.pkg.name }}
     - reload_modules: True
@@ -37,7 +37,7 @@ Ensure PKI dir exists with correct perms:
 
 Trust CA root cert:
 {%-   if "ca_bundle_file" in pca.lookup %}
-  x509_v2.pem_managed:
+  x509.pem_managed:
     - name: {{ salt["file.dirname"](ca_bundle_file) | path_join("salt_ca_root.crt") }}
     - text: {{ ca_root | json }}
     - require:
@@ -47,7 +47,7 @@ Trust CA root cert:
     - name: {{ pca.lookup.ca_bundle_file }}
     - source: {{ salt["file.dirname"](ca_bundle_file) | path_join("salt_ca_root.crt") }}
     - require:
-      - x509_v2: {{ salt["file.dirname"](ca_bundle_file) | path_join("salt_ca_root.crt") }}
+      - x509: {{ salt["file.dirname"](ca_bundle_file) | path_join("salt_ca_root.crt") }}
 {%-   else %}
   file.directory:
     - name: {{ pca.lookup.ca_bundle_path }}
@@ -55,7 +55,7 @@ Trust CA root cert:
     - group: {{ pca.lookup.rootgroup }}
     - mode: '0755'
     - makedirs: true
-  x509_v2.pem_managed:
+  x509.pem_managed:
     - name: {{ pca.lookup.ca_bundle_path | path_join("salt_ca_root.crt") }}
     - text: {{ ca_root | json }}
     - require:
@@ -63,6 +63,6 @@ Trust CA root cert:
   cmd.run:
     - name: {{ pca.lookup.ca_bundle_update_cmd }}
     - onchanges:
-      - x509_v2: {{ pca.lookup.ca_bundle_path | path_join("salt_ca_root.crt") }}
+      - x509: {{ pca.lookup.ca_bundle_path | path_join("salt_ca_root.crt") }}
 {%-   endif %}
 {%- endif %}
