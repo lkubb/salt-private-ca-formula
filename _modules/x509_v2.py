@@ -1917,17 +1917,18 @@ def _parse_crl_entry_extensions(extensions):
 
 def _match_minions(test, minion):
     if "@" in test:
-        # This essentially asks the minion if it is allowed to receive
-        # certificates with the signing policy. Implementing a match runner
-        # would plug that security hole somewhat, and fully if only pillars
-        # are used.
-        match = __salt__["publish.publish"](tgt=minion, fun="match.compound", arg=test)
-        if minion not in match:
+        # This runner is currently not found in salt master
+        # https://github.com/saltstack/salt/pull/63297
+        # Salt master currently asks the minion if it is allowed to receive
+        # certificates with the signing policy.
+        match = __salt__["publish.runner"]("match.compound_matches", arg=[test, minion])
+        if match is None:
             raise CommandExecutionError(
-                "Could not verify if minion matches compound matching expression. "
-                "Make sure the ca_server is allowed to run `match.compound` on "
-                "the requesting minion"
+                "Could not check minion match for compound expression. "
+                "Is this minion allowed to run `match.compound_matches` on the master?"
             )
-        return match[minion]
+        if match == minion:
+            return True
+        return False
     else:
         return __salt__["match.glob"](test, minion)
