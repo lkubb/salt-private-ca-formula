@@ -4,7 +4,7 @@
 {%- set tplroot = tpldir.split('/')[0] %}
 {%- from tplroot ~ "/map.jinja" import mapdata as pca with context %}
 
-{%- set ca_root = (salt["mine.get"](pca.ca.minion_id, "salt_ca_root").get(pca.ca.minion_id, {}).values() | list or [false]) | first %}
+{%- set ca_root = salt["mine.get"](pca.ca.minion_id, "salt_ca_root").get(pca.ca.minion_id, false) %}
 
 Install prerequisites for x509 module:
   pkg.installed:
