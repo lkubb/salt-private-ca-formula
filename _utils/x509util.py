@@ -17,7 +17,9 @@ from cryptography.hazmat.primitives.serialization import pkcs7, pkcs12
 from cryptography.x509.oid import SubjectInformationAccessOID
 
 import salt.utils.files
+import salt.utils.immutabletypes as immutabletypes
 import salt.utils.stringutils
+import salt.utils.versions
 from salt.exceptions import CommandExecutionError, SaltInvocationError
 from salt.utils.odict import OrderedDict
 
@@ -32,139 +34,126 @@ CRYPTOGRAPHY_VERSION = tuple(int(x) for x in cryptography.__version__.split(".")
 
 log = logging.getLogger(__name__)
 
-
-EXTNAMES = [
-    (
-        "basicConstraints",
-        "X509v3 Basic Constraints",
-        cx509.ExtensionOID.BASIC_CONSTRAINTS,
-    ),
-    ("keyUsage", "X509v3 Key Usage", cx509.ExtensionOID.KEY_USAGE),
-    (
-        "extendedKeyUsage",
-        "X509v3 Extended Key Usage",
-        cx509.ExtensionOID.EXTENDED_KEY_USAGE,
-    ),
-    (
-        "subjectKeyIdentifier",
-        "X509v3 Subject Key Identifier",
-        cx509.ExtensionOID.SUBJECT_KEY_IDENTIFIER,
-    ),
-    (
-        "authorityKeyIdentifier",
-        "X509v3 Authority Key Identifier",
-        cx509.ExtensionOID.AUTHORITY_KEY_IDENTIFIER,
-    ),
-    (
-        "issuerAltName",
-        "X509v3 Issuer Alternative Name",
-        cx509.ExtensionOID.ISSUER_ALTERNATIVE_NAME,
-    ),
-    (
-        "authorityInfoAccess",
-        "Authority Information Access",
-        cx509.ExtensionOID.AUTHORITY_INFORMATION_ACCESS,
-    ),
-    (
-        "subjectAltName",
-        "X509v3 Subject Alternative Name",
-        cx509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME,
-    ),
-    (
-        "crlDistributionPoints",
-        "X509v3 CRL Distribution Points",
-        cx509.ExtensionOID.CRL_DISTRIBUTION_POINTS,
-    ),
-    (
-        "issuingDistributionPoint",
-        "X509v3 Issuing Distribution Point",
-        cx509.ExtensionOID.ISSUING_DISTRIBUTION_POINT,
-    ),
-    (
-        "certificatePolicies",
-        "X509v3 Certificate Policies",
-        cx509.ExtensionOID.CERTIFICATE_POLICIES,
-    ),
-    (
-        "policyConstraints",
-        "X509v3 Policy Constraints",
-        cx509.ExtensionOID.POLICY_CONSTRAINTS,
-    ),
-    (
-        "inhibitAnyPolicy",
-        "X509v3 Inhibit Any Policy",
-        cx509.ExtensionOID.INHIBIT_ANY_POLICY,
-    ),
-    ("nameConstraints", "X509v3 Name Constraints", cx509.ExtensionOID.NAME_CONSTRAINTS),
-    ("noCheck", "OCSP No Check", cx509.ExtensionOID.OCSP_NO_CHECK),
-    ("tlsfeature", "TLS Feature", cx509.ExtensionOID.TLS_FEATURE),
-    ("nsComment", "Netscape Comment", None),
-    ("nsCertType", "Netscape Certificate Type", None),
-    ("cRLNumber", "X509v3 CRLNumber", cx509.ExtensionOID.CRL_NUMBER),
-    (
-        "deltaCRLIndicator",
-        "X509v3 Delta CRL Indicator",
-        cx509.ExtensionOID.DELTA_CRL_INDICATOR,
-    ),
-    ("freshestCRL", "x509v3 Freshest CRL", cx509.ExtensionOID.FRESHEST_CRL),
-]
-
-EXTNAMES_CRL_ENTRY = [
-    (
-        "certificateIssuer",
-        "x509v3 Certificate Issuer",
-        cx509.CRLEntryExtensionOID.CERTIFICATE_ISSUER,
-    ),
-    ("CRLReason", "X509v3 CRL Reason Code", cx509.CRLEntryExtensionOID.CRL_REASON),
-    ("invalidityDate", "Invalidity Date", cx509.CRLEntryExtensionOID.INVALIDITY_DATE),
-]
-
-
-class KEY_TYPE(Enum):
-    RSA = 1
-    EC = 2
-    ED25519 = 3
-    ED448 = 4
-
-
-NAME_OID = OrderedDict(
-    [
-        ("C", cx509.NameOID.COUNTRY_NAME),
-        ("ST", cx509.NameOID.STATE_OR_PROVINCE_NAME),
-        ("L", cx509.NameOID.LOCALITY_NAME),
-        ("STREET", cx509.NameOID.STREET_ADDRESS),
-        ("O", cx509.NameOID.ORGANIZATION_NAME),
-        ("OU", cx509.NameOID.ORGANIZATIONAL_UNIT_NAME),
-        ("CN", cx509.NameOID.COMMON_NAME),
-        ("MAIL", cx509.NameOID.EMAIL_ADDRESS),
-        ("SN", cx509.NameOID.SURNAME),
-        ("GN", cx509.NameOID.GIVEN_NAME),
-        ("UID", cx509.NameOID.USER_ID),
-        ("SERIALNUMBER", cx509.NameOID.SERIAL_NUMBER),
-    ]
+NAME_ATTRS_ALT_NAMES = immutabletypes.freeze(
+    {
+        "CN": ("commonName",),
+        "L": ("localityName",),
+        "ST": ("stateOrProvinceName",),
+        "O": ("organizationName",),
+        "OU": ("organizationUnitName",),
+        "GN": ("givenName",),
+        "SN": ("surname",),
+        "MAIL": ("Email", "emailAddress"),
+        "SERIALNUMBER": ("serialNumber",),
+    }
 )
 
-EXTENDED_KEY_USAGE_OID = {
-    "serverAuth": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.1"),
-    "clientAuth": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.2"),
-    "codeSigning": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.3"),
-    "emailProtection": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.4"),
-    "timeStamping": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.8"),
-    "OCSPSigning": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.9"),
-    "msSmartcardLogin": cx509.ObjectIdentifier("1.3.6.1.4.1.311.20.2.2"),
-    "pkInitKDC": cx509.ObjectIdentifier("1.3.6.1.5.2.3.5"),
-    "ipsecIKE": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.17"),
-    "msCodeInd": cx509.ObjectIdentifier("1.3.6.1.4.1.311.2.1.21"),
-    "msCodeCom": cx509.ObjectIdentifier("1.3.6.1.4.1.311.2.1.22"),
-    "msCTLSign": cx509.ObjectIdentifier("1.3.6.1.4.1.311.10.3.1"),
-    "msEFS": cx509.ObjectIdentifier("1.3.6.1.4.1.311.10.3.4"),
-}
+NAME_ATTRS_OID = immutabletypes.freeze(
+    OrderedDict(
+        [
+            ("C", cx509.NameOID.COUNTRY_NAME),
+            ("ST", cx509.NameOID.STATE_OR_PROVINCE_NAME),
+            ("L", cx509.NameOID.LOCALITY_NAME),
+            ("STREET", cx509.NameOID.STREET_ADDRESS),
+            ("O", cx509.NameOID.ORGANIZATION_NAME),
+            ("OU", cx509.NameOID.ORGANIZATIONAL_UNIT_NAME),
+            ("CN", cx509.NameOID.COMMON_NAME),
+            ("MAIL", cx509.NameOID.EMAIL_ADDRESS),
+            ("SN", cx509.NameOID.SURNAME),
+            ("GN", cx509.NameOID.GIVEN_NAME),
+            ("UID", cx509.NameOID.USER_ID),
+            ("SERIALNUMBER", cx509.NameOID.SERIAL_NUMBER),
+        ]
+    )
+)
 
-ACCESS_OID = {
-    "OCSP": cx509.AuthorityInformationAccessOID.OCSP,
-    "caIssuers": cx509.AuthorityInformationAccessOID.CA_ISSUERS,
-    "caRepository": SubjectInformationAccessOID.CA_REPOSITORY,
-}
+EXTENSIONS_ALT_NAMES = immutabletypes.freeze(
+    {
+        "basicConstraints": ("X509v3 Basic Constraints",),
+        "keyUsage": ("X509v3 Key Usage",),
+        "extendedKeyUsage": ("X509v3 Extended Key Usage",),
+        "subjectKeyIdentifier": ("X509v3 Subject Key Identifier",),
+        "authorityKeyIdentifier": ("X509v3 Authority Key Identifier",),
+        # issuserAltName was a typo in the old x509 modules
+        "issuerAltName": ("X509v3 Issuer Alternative Name", "issuserAltName"),
+        "authorityInfoAccess": ("Authority Information Access",),
+        "subjectAltName": ("X509v3 Subject Alternative Name",),
+        "crlDistributionPoints": ("X509v3 CRL Distribution Points",),
+        "issuingDistributionPoint": ("X509v3 Issuing Distribution Point",),
+        "certificatePolicies": ("X509v3 Certificate Policies",),
+        "policyConstraints": ("X509v3 Policy Constraints",),
+        "inhibitAnyPolicy": ("X509v3 Inhibit Any Policy",),
+        "nameConstraints": ("X509v3 Name Constraints",),
+        "noCheck": ("OCSP No Check",),
+        "tlsfeature": ("TLS Feature",),
+        "nsComment": ("Netscape Comment",),
+        "nsCertType": ("Netscape Certificate Type",),
+        "cRLNumber": ("X509v3 CRLNumber",),
+        "deltaCRLIndicator": ("X509v3 Delta CRL Indicator",),
+        "freshestCRL": ("x509v3 Freshest CRL",),
+    }
+)
+
+EXTENSIONS_OID = immutabletypes.freeze(
+    {
+        "basicConstraints": cx509.ExtensionOID.BASIC_CONSTRAINTS,
+        "keyUsage": cx509.ExtensionOID.KEY_USAGE,
+        "extendedKeyUsage": cx509.ExtensionOID.EXTENDED_KEY_USAGE,
+        "subjectKeyIdentifier": cx509.ExtensionOID.SUBJECT_KEY_IDENTIFIER,
+        "authorityKeyIdentifier": cx509.ExtensionOID.AUTHORITY_KEY_IDENTIFIER,
+        "issuerAltName": cx509.ExtensionOID.ISSUER_ALTERNATIVE_NAME,
+        "authorityInfoAccess": cx509.ExtensionOID.AUTHORITY_INFORMATION_ACCESS,
+        "subjectAltName": cx509.ExtensionOID.SUBJECT_ALTERNATIVE_NAME,
+        "crlDistributionPoints": cx509.ExtensionOID.CRL_DISTRIBUTION_POINTS,
+        "issuingDistributionPoint": cx509.ExtensionOID.ISSUING_DISTRIBUTION_POINT,
+        "certificatePolicies": cx509.ExtensionOID.CERTIFICATE_POLICIES,
+        "policyConstraints": cx509.ExtensionOID.POLICY_CONSTRAINTS,
+        "inhibitAnyPolicy": cx509.ExtensionOID.INHIBIT_ANY_POLICY,
+        "nameConstraints": cx509.ExtensionOID.NAME_CONSTRAINTS,
+        "noCheck": cx509.ExtensionOID.OCSP_NO_CHECK,
+        "tlsfeature": cx509.ExtensionOID.TLS_FEATURE,
+        "nsComment": None,
+        "nsCertType": None,
+        "cRLNumber": cx509.ExtensionOID.CRL_NUMBER,
+        "deltaCRLIndicator": cx509.ExtensionOID.DELTA_CRL_INDICATOR,
+        "freshestCRL": cx509.ExtensionOID.FRESHEST_CRL,
+    }
+)
+
+EXTENSIONS_CRL_ENTRY_OID = immutabletypes.freeze(
+    {
+        "certificateIssuer": cx509.CRLEntryExtensionOID.CERTIFICATE_ISSUER,
+        "CRLReason": cx509.CRLEntryExtensionOID.CRL_REASON,
+        "invalidityDate": cx509.CRLEntryExtensionOID.INVALIDITY_DATE,
+    }
+)
+
+
+EXTENDED_KEY_USAGE_OID = immutabletypes.freeze(
+    {
+        "serverAuth": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.1"),
+        "clientAuth": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.2"),
+        "codeSigning": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.3"),
+        "emailProtection": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.4"),
+        "timeStamping": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.8"),
+        "OCSPSigning": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.9"),
+        "msSmartcardLogin": cx509.ObjectIdentifier("1.3.6.1.4.1.311.20.2.2"),
+        "pkInitKDC": cx509.ObjectIdentifier("1.3.6.1.5.2.3.5"),
+        "ipsecIKE": cx509.ObjectIdentifier("1.3.6.1.5.5.7.3.17"),
+        "msCodeInd": cx509.ObjectIdentifier("1.3.6.1.4.1.311.2.1.21"),
+        "msCodeCom": cx509.ObjectIdentifier("1.3.6.1.4.1.311.2.1.22"),
+        "msCTLSign": cx509.ObjectIdentifier("1.3.6.1.4.1.311.10.3.1"),
+        "msEFS": cx509.ObjectIdentifier("1.3.6.1.4.1.311.10.3.4"),
+    }
+)
+
+ACCESS_OID = immutabletypes.freeze(
+    {
+        "OCSP": cx509.AuthorityInformationAccessOID.OCSP,
+        "caIssuers": cx509.AuthorityInformationAccessOID.CA_ISSUERS,
+        "caRepository": SubjectInformationAccessOID.CA_REPOSITORY,
+    }
+)
 
 CERT_EXTS = (
     "basicConstraints",
@@ -196,12 +185,6 @@ CRL_EXTS = (
     "issuingDistributionPoint",
 )
 
-CRL_ENTRY_EXTS = (
-    "certificateIssuer",
-    "CRLReason",
-    "invalidityDate",
-)
-
 CSR_FORBIDDEN = (
     "authorityInfoAccess",
     "authorityKeyIdentifier",
@@ -210,10 +193,42 @@ CSR_FORBIDDEN = (
 )
 
 
+class KEY_TYPE(Enum):
+    RSA = 1
+    EC = 2
+    ED25519 = 3
+    ED448 = 4
+
+
 PEM_BEGIN = b"-----BEGIN"
 PEM_END = b"-----END"
 
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+def ensure_cert_kwargs_compat(kwargs):
+    """
+    Ensures the deprecated long form of Name Attribute and
+    extension definitions is still recognized, but warned about.
+    """
+    for name, long_names in NAME_ATTRS_ALT_NAMES.items():
+        for long_name in long_names:
+            if long_name in kwargs:
+                salt.utils.versions.warn_until(
+                    "Potassium",
+                    f"Found {long_name} in keyword args. Please migrate to the short name: {name}",
+                )
+                kwargs[name] = kwargs.pop(long_name)
+
+    for extname, long_names in EXTENSIONS_ALT_NAMES.items():
+        for long_name in long_names:
+            if long_name in kwargs:
+                salt.utils.versions.warn_until(
+                    "Potassium",
+                    f"Found {long_name} in keyword args. Please migrate to the short name: {extname}",
+                )
+                kwargs[extname] = kwargs.pop(long_name)
+    return kwargs
 
 
 def build_crt(
@@ -310,14 +325,11 @@ def build_crt(
     builder = builder.not_valid_before(not_before).not_valid_after(not_after)
 
     ext_present = []
-    for extname, extlongname, _ in EXTNAMES:
+    for extname in EXTENSIONS_OID:
         if extname not in CERT_EXTS:
             continue
-        if extname in kwargs or extlongname in kwargs:
-            try:
-                val = kwargs[extname]
-            except KeyError:
-                val = kwargs[extlongname]
+        if extname in kwargs:
+            val = kwargs[extname]
             # signing policies need to be able to force-unset extensions
             if val is None:
                 continue
@@ -334,7 +346,7 @@ def build_crt(
             )
             ext_present.append(extname)
     if csr:
-        for extname, _, oid in EXTNAMES:
+        for extname, oid in EXTENSIONS_OID.items():
             if any(
                 (
                     extname in ext_present,
@@ -363,7 +375,7 @@ def build_csr(private_key, private_key_passphrase=None, subject=None, **kwargs):
     builder = cx509.CertificateSigningRequestBuilder()
     subject_name = _get_dn(subject or kwargs)
     builder = builder.subject_name(subject_name)
-    for extname, extlongname, oid in EXTNAMES:
+    for extname, oid in EXTENSIONS_OID.items():
         if any(
             (
                 extname not in CERT_EXTS,
@@ -371,9 +383,10 @@ def build_csr(private_key, private_key_passphrase=None, subject=None, **kwargs):
             )
         ):
             continue
-        if extname in kwargs or extlongname in kwargs:
-            val = kwargs.get(extname) or kwargs[extlongname]
-            ext, critical = _create_extension(extname, val, subject_pubkey=public_key)
+        if extname in kwargs:
+            ext, critical = _create_extension(
+                extname, kwargs[extname], subject_pubkey=public_key
+            )
             builder = builder.add_extension(
                 ext,
                 critical=critical,
@@ -440,21 +453,21 @@ def build_crl(
             serial_number=serial_number, revocation_date=revocation_date
         )
         for extname, val in rev.get("extensions", {}).items():
-            if extname not in CRL_ENTRY_EXTS:
+            if extname not in EXTENSIONS_CRL_ENTRY_OID:
+                log.warning("Ignoring invalid CRL entry extension: %s", extname)
                 continue
             ext, critical = _create_extension(extname, val)
             revoked_cert = revoked_cert.add_extension(ext, critical=critical)
         builder = builder.add_revoked_certificate(revoked_cert.build())
-    for extname, _, _ in EXTNAMES:
+    for extname, val in extensions.items():
         if extname not in CRL_EXTS:
+            log.warning("Ignoring invalid CRL extension: %s", extname)
             continue
-        if extname in extensions:
-            val = extensions[extname]
-            ext, critical = _create_extension(extname, val, ca_crt=signing_cert)
-            builder = builder.add_extension(
-                ext,
-                critical=critical,
-            )
+        ext, critical = _create_extension(extname, val, ca_crt=signing_cert)
+        builder = builder.add_extension(
+            ext,
+            critical=critical,
+        )
     return builder, signing_private_key
 
 
@@ -562,9 +575,30 @@ def merge_signing_policy(policy, kwargs):
         return kwargs
     # ensure we don't modify data that is used elsewhere
     policy = copy.deepcopy(policy)
+
+    # Don't immediately break for the long form of name attributes
+    for name, long_names in NAME_ATTRS_ALT_NAMES.items():
+        for long_name in long_names:
+            if long_name in kwargs:
+                salt.utils.versions.warn_until(
+                    "Potassium",
+                    f"Found {long_name} in keyword args. Please migrate to the short name: {name}",
+                )
+                kwargs[name] = kwargs.pop(long_name)
+
+    # Don't immediately break for the long form of extensions
+    for extname, long_names in EXTENSIONS_ALT_NAMES.items():
+        for long_name in long_names:
+            if long_name in kwargs:
+                salt.utils.versions.warn_until(
+                    "Potassium",
+                    f"Found {long_name} in keyword args. Please migrate to the short name: {extname}",
+                )
+                kwargs[extname] = kwargs.pop(long_name)
+
     if "subject" in kwargs:
         # a) ensure subject in kwargs does not override CN etc from signing policy
-        if any(x in policy for x in NAME_OID):
+        if any(x in policy for x in NAME_ATTRS_OID):
             kwargs.pop("subject")
         # b) subject is not enforced or if it is a string, it cannot be overridden
         elif "subject" not in policy or not isinstance(policy["subject"], (dict, list)):
@@ -1036,529 +1070,595 @@ def load_file_or_bytes(fob):
 
 
 def _create_extension(name, val, subject_pubkey=None, ca_crt=None, ca_pub=None):
-    if name == "basicConstraints":
+    if name not in EXTENSION_BUILDERS:
+        raise CommandExecutionError(f"Unknown extension {name}")
+    return EXTENSION_BUILDERS[name](
+        val, subject_pubkey=subject_pubkey, ca_crt=ca_crt, ca_pub=ca_pub
+    )
+
+
+def _create_basic_constraints(val, **kwargs):
+    try:
+        critical = val.get("critical", False)
+    except AttributeError:
+        critical = False
+    if isinstance(val, str):
         try:
-            critical = val.get("critical", False)
-        except AttributeError:
-            critical = False
-        if isinstance(val, str):
-            try:
-                val, critical = _deserialize_openssl_confstring(val.lower())
-                val["ca"] = val["ca"] == "true"
-                if "pathlen" in val:
-                    val["pathlen"] = int(val["pathlen"])
-            except (KeyError, ValueError) as err:
-                raise SaltInvocationError(
-                    f"Invalid configuration for basicContraints: {err}"
-                ) from err
+            val, critical = _deserialize_openssl_confstring(val.lower())
+            val["ca"] = val["ca"] == "true"
+            if "pathlen" in val:
+                val["pathlen"] = int(val["pathlen"])
+        except (KeyError, ValueError) as err:
+            raise SaltInvocationError(
+                f"Invalid configuration for basicContraints: {err}"
+            ) from err
+    try:
+        return (
+            cx509.BasicConstraints(val["ca"], val.get("pathlen")),
+            critical,
+        )
+    except KeyError as err:
+        raise SaltInvocationError(
+            f"Undefined required key for basicConstraints: {err}"
+        ) from err
+    except (TypeError, ValueError) as err:
+        raise SaltInvocationError(err) from err
+
+
+def _create_key_usage(val, **kwargs):
+    critical = "critical" in val
+    args = {
+        "digital_signature": "digitalSignature" in val,
+        "content_commitment": "nonRepudiation" in val,
+        "key_encipherment": "keyEncipherment" in val,
+        "data_encipherment": "dataEncipherment" in val,
+        "key_agreement": "keyAgreement" in val,
+        "key_cert_sign": "keyCertSign" in val,
+        "crl_sign": "cRLSign" in val,
+        "encipher_only": "encipherOnly" in val,
+        "decipher_only": "decipherOnly" in val,
+    }
+    try:
+        return cx509.KeyUsage(**args), critical
+    except ValueError as err:
+        raise SaltInvocationError(err) from err
+
+
+def _create_extended_key_usage(val, **kwargs):
+    critical = "critical" in val
+    if isinstance(val, str):
+        val, critical = _deserialize_openssl_confstring(val)
+        val = list(val)
+    if not isinstance(val, list):
+        val = [val]
+    usages = []
+    for usage in val:
+        if usage == "critical":
+            continue
+        usages.append(EXTENDED_KEY_USAGE_OID.get(usage) or _get_oid(str(usage)))
+    return cx509.ExtendedKeyUsage(usages), critical
+
+
+def _create_subject_key_identifier(val, subject_pubkey, **kwargs):
+    if "critical" in val:
+        raise SaltInvocationError("subjectKeyIdentifier must be marked as non-critical")
+    if val == "hash":
+        if not subject_pubkey:
+            raise RuntimeError(
+                "Cannot calculate digest for subjectKeyIdentifier: missing pubkey"
+            )
         try:
             return (
-                cx509.BasicConstraints(val["ca"], val.get("pathlen")),
-                critical,
+                cx509.SubjectKeyIdentifier.from_public_key(subject_pubkey),
+                False,
             )
-        except KeyError as err:
-            raise SaltInvocationError(
-                f"Undefined required key for {name}: {err}"
+        except AttributeError as err:
+            raise RuntimeError(
+                "subjectKeyIdentifier: subject_pubkey was not a pubkey"
             ) from err
-        except (TypeError, ValueError) as err:
-            raise SaltInvocationError(err) from err
-
-    if name == "keyUsage":
-        critical = "critical" in val
-        args = {
-            "digital_signature": "digitalSignature" in val,
-            "content_commitment": "nonRepudiation" in val,
-            "key_encipherment": "keyEncipherment" in val,
-            "data_encipherment": "dataEncipherment" in val,
-            "key_agreement": "keyAgreement" in val,
-            "key_cert_sign": "keyCertSign" in val,
-            "crl_sign": "cRLSign" in val,
-            "encipher_only": "encipherOnly" in val,
-            "decipher_only": "decipherOnly" in val,
-        }
+    if isinstance(val, str):
         try:
-            return cx509.KeyUsage(**args), critical
+            val = bytes.fromhex(val.replace(":", ""))
+        except ValueError as err:
+            raise SaltInvocationError("Value must be precomputed hash") from err
+    if not isinstance(val, bytes):
+        raise SaltInvocationError("Value must be a (hex-)digest or pubkey")
+    # this must be marked as non-critical
+    return cx509.SubjectKeyIdentifier(val), False
+
+
+def _create_authority_key_identifier(val, ca_crt, ca_pub, **kwargs):
+    if "critical" in val:
+        raise SaltInvocationError(
+            "authorityKeyIdentifier must be marked as non-critical"
+        )
+    if not (ca_crt or ca_pub):
+        raise RuntimeError(
+            "Need CA certificate or CA pubkey to calculate authorityKeyIdentifier"
+        )
+    if isinstance(val, str):
+        val, _ = _deserialize_openssl_confstring(val)
+    args = {
+        "key_identifier": None,
+        "authority_cert_issuer": None,
+        "authority_cert_serial_number": None,
+    }
+    if "keyid" in val:
+        if ca_crt:
+            try:
+                args["key_identifier"] = ca_crt.extensions.get_extension_for_class(
+                    cx509.SubjectKeyIdentifier
+                ).value.digest
+            except cx509.ExtensionNotFound:
+                args[
+                    "key_identifier"
+                ] = cx509.AuthorityKeyIdentifier.from_issuer_public_key(
+                    ca_crt.public_key()
+                ).key_identifier
+            except Exception:  # pylint: disable=broad-except
+                pass
+        if not args["key_identifier"] and ca_pub:
+            # this should happen for self-signed certificates
+            try:
+                args[
+                    "key_identifier"
+                ] = cx509.AuthorityKeyIdentifier.from_issuer_public_key(
+                    ca_pub
+                ).key_identifier
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+        if val["keyid"] == "always" and args["key_identifier"] is None:
+            raise CommandExecutionError(
+                "Could not retrieve authorityKeyIdentifier keyid, but it was set to always"
+            )
+
+    if val.get("issuer") == "always" or (
+        "issuer" in val and args["key_identifier"] is None
+    ):
+        try:
+            args["authority_cert_issuer"] = [cx509.DirectoryName(ca_crt.issuer)]
+            args["authority_cert_serial_number"] = ca_crt.serial_number
+        except (AttributeError, ValueError) as err:
+            # this will not work for self-signed certificates currently
+            args["authority_cert_issuer"] = args["authority_cert_serial_number"] = None
+            if val["issuer"] == "always":
+                raise CommandExecutionError(
+                    "Could not add authority_cert_issuer and "
+                    "authority_cert_serial_number, but was set to always."
+                ) from err
+
+    if not args:
+        raise SaltInvocationError("authorityKeyIdentifier cannot be empty.")
+    # this must be marked as non-critical
+    return cx509.AuthorityKeyIdentifier(**args), False
+
+
+def _create_issuer_alt_name(val, ca_crt, **kwargs):
+    parsed, critical = _parse_issuer_general_name(val, ca_crt)
+    return cx509.IssuerAlternativeName(parsed), critical
+
+
+def _create_certificate_issuer(val, ca_crt, **kwargs):
+    parsed, critical = _parse_issuer_general_name(val, ca_crt)
+    return cx509.CertificateIssuer(parsed), critical
+
+
+def _parse_issuer_general_name(val, ca_crt):
+    critical = "critical" in val
+    if isinstance(val, list):
+        list_ = []
+        for x in val:
+            if isinstance(x, str) and ":" in x:
+                k, v = x.split(":", maxsplit=1)
+                list_.append((k.strip(), v.strip()))
+            elif isinstance(x, dict):
+                list_.extend(list(x.items()))
+        # since this is accessed twice, the generator needs to be cast to a tuple
+        val = tuple(list_)
+    elif isinstance(val, str):
+        val, critical = _deserialize_openssl_confstring(val, multiple=True)
+        val = tuple(val)
+    parsed = []
+    if any(x == ("issuer", "copy") for x in val):
+        if not ca_crt:
+            raise RuntimeError("Need CA certificate to copy to issuerAltName")
+        try:
+            # eeh, there's no public API to get the list of general names
+            parsed.extend(
+                copy.deepcopy(
+                    ca_crt.extensions.get_extension_for_class(
+                        cx509.SubjectAlternativeName
+                    )._general_names._general_names
+                )
+            )
+            val = tuple(x for x in val if x[0] != "issuer")
+        except cx509.ExtensionNotFound as err:
+            raise CommandExecutionError(err) from err
+        except AttributeError as err:
+            raise CommandExecutionError(
+                "It seems your version of cryptography does not have an "
+                "internal API that the issuer:copy functionality relies on"
+            ) from err
+    parsed.extend(_parse_general_names(val))
+    return parsed, critical
+
+
+def _create_authority_info_access(val, **kwargs):
+    if isinstance(val, str):
+        val = (x.strip().split(";") for x in val.split(",") if x.strip() != "critical")
+    elif isinstance(val, dict):
+        val = ((k, v) for k, v in val.items() if k != "critical")
+    elif isinstance(val, list):
+        val = ((k, v) for x in val for k, v in x.items() if x != "critical")
+
+    parsed = []
+    for oid, general_name in val:
+        try:
+            oid = ACCESS_OID.get(oid) or _get_oid(str(oid))
+        except CommandExecutionError as err:
+            raise CommandExecutionError(f"Unknown access OID: {oid}") from err
+        general_name = _get_gn(general_name)
+        parsed.append(cx509.AccessDescription(oid, general_name))
+    return cx509.AuthorityInformationAccess(parsed), False  # always noncritical
+
+
+def _create_subject_alt_name(val, **kwargs):
+    # Note: subjectAltName must be marked as critical if subject is empty.
+    # This is not checked.
+    critical = "critical" in val
+    if isinstance(val, list):
+        list_ = []
+        for x in val:
+            if isinstance(x, str) and ":" in x:
+                k, v = x.split(":", maxsplit=1)
+                list_.append((k.strip(), v.strip()))
+            elif isinstance(x, dict):
+                list_.extend(list(x.items()))
+        val = tuple(list_)
+    elif isinstance(val, str):
+        val, critical = _deserialize_openssl_confstring(val, multiple=True)
+    parsed = _parse_general_names(val)
+    return cx509.SubjectAlternativeName(parsed), critical
+
+
+def _create_crl_distribution_points(val, **kwargs):
+    parsed, critical = _parse_distribution_points(val)
+    return cx509.CRLDistributionPoints(parsed), critical
+
+
+def _create_freshest_crl(val, **kwargs):
+    parsed, _ = _parse_distribution_points(val)
+    return cx509.FreshestCRL(parsed), False  # must be non-critical
+
+
+def _parse_distribution_points(val):
+    critical = "critical" in val
+    if isinstance(val, str):
+        val, critical = _deserialize_openssl_confstring(val, multiple=True)
+    elif isinstance(val, list):
+        list_ = []
+        for x in val:
+            if isinstance(x, str) and ":" in x:
+                k, v = x.split(":", maxsplit=1)
+                list_.append((k.strip(), v.strip()))
+            elif x != "critical":
+                list_.append(x)
+        val = tuple(list_)
+    parsed = []
+    for dpoint in val:
+        fullname = relativename = crlissuer = reasons = None
+        if isinstance(dpoint, dict):
+            fullname = dpoint.get("fullname")
+            relativename = dpoint.get("relativename")
+            crlissuer = dpoint.get("crlissuer")
+            reasons = dpoint.get("reasons")
+            if fullname:
+                if not isinstance(fullname, list):
+                    fullname = [fullname]
+                fullname = (x.split(":", maxsplit=1) for x in fullname)
+            if relativename:
+                relativename = _get_rdn(relativename)
+            if crlissuer:
+                if not isinstance(crlissuer, list):
+                    crlissuer = [crlissuer]
+                crlissuer = _parse_general_names(
+                    x.split(":", maxsplit=1) for x in crlissuer
+                )
+            if reasons:
+                try:
+                    reasons = frozenset(cx509.ReasonFlags(x) for x in reasons)
+                except ValueError as err:
+                    raise SaltInvocationError(err) from err
+        else:
+            fullname = (dpoint,)
+        if fullname:
+            fullname = _parse_general_names(fullname)
+        try:
+            parsed.append(
+                cx509.DistributionPoint(
+                    full_name=fullname,
+                    relative_name=relativename,
+                    reasons=reasons,
+                    crl_issuer=crlissuer,
+                )
+            )
+        except (ValueError, TypeError) as err:
+            raise SaltInvocationError(err) from err
+    return parsed, critical
+
+
+def _create_issuing_distribution_point(val, **kwargs):
+    if not isinstance(val, dict):
+        raise SaltInvocationError("issuingDistributionPoint must be a dictionary")
+    critical = val.get("critical", False)
+    onlyuser = val.get("onlyuser", False)
+    onlyca = val.get("onlyCA", False)
+    onlyaa = val.get("onlyAA", False)
+    indirectcrl = val.get("indirectCRL", False)
+    fullname = val.get("fullname")
+    relativename = val.get("relativename")
+    onlysomereasons = val.get("onlysomereasons")
+    if fullname:
+        if not isinstance(fullname, list):
+            fullname = [fullname]
+        fullname = (x.split(":", maxsplit=1) for x in fullname)
+        fullname = _parse_general_names(fullname)
+    if relativename:
+        relativename = _get_rdn(relativename)
+    if onlysomereasons:
+        try:
+            onlysomereasons = frozenset(cx509.ReasonFlags(x) for x in onlysomereasons)
         except ValueError as err:
             raise SaltInvocationError(err) from err
+    try:
+        return (
+            cx509.IssuingDistributionPoint(
+                full_name=fullname,
+                relative_name=relativename,
+                only_contains_user_certs=onlyuser,
+                only_contains_ca_certs=onlyca,
+                only_some_reasons=onlysomereasons,
+                indirect_crl=indirectcrl,
+                only_contains_attribute_certs=onlyaa,
+            ),
+            critical,
+        )
+    except (ValueError, TypeError) as err:
+        raise SaltInvocationError(err) from err
 
-    if name == "extendedKeyUsage":
-        critical = "critical" in val
-        if isinstance(val, str):
-            val, critical = _deserialize_openssl_confstring(val)
-            val = list(val)
-        if not isinstance(val, list):
-            val = [val]
-        usages = []
-        for usage in val:
-            if usage == "critical":
+
+def _create_certificate_policies(val, **kwargs):
+    if isinstance(val, str):
+        try:
+            critical = val.startswith("critical")
+            policy_identifiers = (
+                _get_oid(x.strip()) for x in val.split(",") if x.strip() != "critical"
+            )
+            policy_information = [
+                cx509.PolicyInformation(policy_identifier=p, policy_qualifiers=None)
+                for p in policy_identifiers
+            ]
+            return cx509.CertificatePolicies(policy_information), critical
+        except CommandExecutionError as err:
+            raise SaltInvocationError(
+                "certificatePolicies defined as string must be a "
+                "comma-separated list of OID."
+            ) from err
+    critical = val.get("critical", False)
+    parsed = []
+    for polid, qualifiers in val.items():
+        if polid == "critical":
+            continue
+        parsed_qualifiers = []
+        for qual in qualifiers:
+            if isinstance(qual, str):
+                # pointer to the practice statement published by the certificate authority
+                parsed_qualifiers.append(qual)
                 continue
-            usages.append(EXTENDED_KEY_USAGE_OID.get(usage) or _get_oid(str(usage)))
-        return cx509.ExtendedKeyUsage(usages), critical
-
-    if name == "subjectKeyIdentifier":
-        if "critical" in val:
-            raise SaltInvocationError(
-                "subjectKeyIdentifier must be marked as non-critical"
-            )
-        if val == "hash":
-            if not subject_pubkey:
-                raise RuntimeError(
-                    "Cannot calculate digest for subjectKeyIdentifier: missing pubkey"
-                )
-            try:
-                return (
-                    cx509.SubjectKeyIdentifier.from_public_key(subject_pubkey),
-                    False,
-                )
-            except AttributeError as err:
-                raise RuntimeError(
-                    "subjectKeyIdentifier: subject_pubkey was not a pubkey"
-                ) from err
-        if isinstance(val, str):
-            try:
-                val = bytes.fromhex(val.replace(":", ""))
-            except ValueError as err:
-                raise SaltInvocationError("Value must be precomputed hash") from err
-        if not isinstance(val, bytes):
-            raise SaltInvocationError("Value must be a (hex-)digest or pubkey")
-        # this must be marked as non-critical
-        return cx509.SubjectKeyIdentifier(val), False
-
-    if name == "authorityKeyIdentifier":
-        if "critical" in val:
-            raise SaltInvocationError(
-                "authorityKeyIdentifier must be marked as non-critical"
-            )
-        if not (ca_crt or ca_pub):
-            raise RuntimeError(
-                "Need CA certificate or CA pubkey to calculate authorityKeyIdentifier"
-            )
-        if isinstance(val, str):
-            val, _ = _deserialize_openssl_confstring(val)
-        args = {
-            "key_identifier": None,
-            "authority_cert_issuer": None,
-            "authority_cert_serial_number": None,
-        }
-        if "keyid" in val:
-            if ca_crt:
+            notice = None
+            organization = qual.get("organization")
+            notice_numbers = qual.get("noticeNumbers")
+            text = qual.get("text")
+            if notice_numbers:
                 try:
-                    args["key_identifier"] = ca_crt.extensions.get_extension_for_class(
-                        cx509.SubjectKeyIdentifier
-                    ).value.digest
-                except cx509.ExtensionNotFound:
-                    args[
-                        "key_identifier"
-                    ] = cx509.AuthorityKeyIdentifier.from_issuer_public_key(
-                        ca_crt.public_key()
-                    ).key_identifier
-                except Exception:  # pylint: disable=broad-except
-                    pass
-            if not args["key_identifier"] and ca_pub:
-                # this should happen for self-signed certificates
-                try:
-                    args[
-                        "key_identifier"
-                    ] = cx509.AuthorityKeyIdentifier.from_issuer_public_key(
-                        ca_pub
-                    ).key_identifier
-                except Exception:  # pylint: disable=broad-except
-                    pass
-
-            if val["keyid"] == "always" and args["key_identifier"] is None:
-                raise CommandExecutionError(
-                    "Could not retrieve authorityKeyIdentifier keyid, but it was set to always"
-                )
-
-        if val.get("issuer") == "always" or (
-            "issuer" in val and args["key_identifier"] is None
-        ):
-            try:
-                args["authority_cert_issuer"] = [cx509.DirectoryName(ca_crt.issuer)]
-                args["authority_cert_serial_number"] = ca_crt.serial_number
-            except (AttributeError, ValueError) as err:
-                # this will not work for self-signed certificates currently
-                args["authority_cert_issuer"] = args[
-                    "authority_cert_serial_number"
-                ] = None
-                if val["issuer"] == "always":
-                    raise CommandExecutionError(
-                        "Could not add authority_cert_issuer and "
-                        "authority_cert_serial_number, but was set to always."
-                    ) from err
-
-        if not args:
-            raise SaltInvocationError("authorityKeyIdentifier cannot be empty.")
-        # this must be marked as non-critical
-        return cx509.AuthorityKeyIdentifier(**args), False
-
-    if name in ["issuerAltName", "certificateIssuer"]:
-        critical = "critical" in val
-        if isinstance(val, list):
-            list_ = []
-            for x in val:
-                if isinstance(x, str) and ":" in x:
-                    k, v = x.split(":", maxsplit=1)
-                    list_.append((k.strip(), v.strip()))
-                elif isinstance(x, dict):
-                    list_.extend(list(x.items()))
-            # since this is accessed twice, the generator needs to be cast to a tuple
-            val = tuple(list_)
-        elif isinstance(val, str):
-            val, critical = _deserialize_openssl_confstring(val, multiple=True)
-            val = tuple(val)
-        parsed = []
-        if any(x == ("issuer", "copy") for x in val):
-            if not ca_crt:
-                raise RuntimeError("Need CA certificate to copy to issuerAltName")
-            try:
-                # eeh, there's no public API to get the list of general names
-                parsed.extend(
-                    copy.deepcopy(
-                        ca_crt.extensions.get_extension_for_class(
-                            cx509.SubjectAlternativeName
-                        )._general_names._general_names
+                    notice = cx509.NoticeReference(
+                        organization=organization, notice_numbers=notice_numbers
                     )
+                except TypeError as err:
+                    raise CommandExecutionError(err) from err
+                parsed_qualifiers.append(
+                    cx509.UserNotice(notice_reference=notice, explicit_text=text)
                 )
-                val = tuple(x for x in val if x[0] != "issuer")
-            except cx509.ExtensionNotFound as err:
-                raise CommandExecutionError(err) from err
-            except AttributeError as err:
-                raise CommandExecutionError(
-                    "It seems your version of cryptography does not have an "
-                    "internal API that the issuer:copy functionality relies on"
-                ) from err
-        parsed.extend(_parse_general_names(val))
-        if name == "certificateIssuer":
-            return cx509.CertificateIssuer(parsed), critical
-        return cx509.IssuerAlternativeName(parsed), critical
-
-    if name == "authorityInfoAccess":
-        if isinstance(val, str):
-            val = (
-                x.strip().split(";") for x in val.split(",") if x.strip() != "critical"
+        parsed.append(
+            cx509.PolicyInformation(
+                policy_identifier=_get_oid(polid),
+                policy_qualifiers=parsed_qualifiers,
             )
-        elif isinstance(val, dict):
-            val = ((k, v) for k, v in val.items() if k != "critical")
-        elif isinstance(val, list):
-            val = ((k, v) for x in val for k, v in x.items() if x != "critical")
+        )
+    return cx509.CertificatePolicies(parsed), critical
 
-        parsed = []
-        for oid, general_name in val:
-            try:
-                oid = ACCESS_OID.get(oid) or _get_oid(str(oid))
-            except CommandExecutionError as err:
-                raise CommandExecutionError(f"Unknown access OID: {oid}") from err
-            general_name = _get_gn(general_name)
-            parsed.append(cx509.AccessDescription(oid, general_name))
-        return cx509.AuthorityInformationAccess(parsed), False  # always noncritical
 
-    if name == "subjectAltName":
-        # subjectAltName must be marked as critical if subject is empty
-        critical = "critical" in val
-        if isinstance(val, list):
+def _create_policy_constraints(val, **kwargs):
+    critical = "critical" in val
+    if isinstance(val, str):
+        val, critical = _deserialize_openssl_confstring(val)
+    args = {
+        "require_explicit_policy": int(val["requireExplicitPolicy"])
+        if "requireExplicitPolicy" in val
+        else None,
+        "inhibit_policy_mapping": int(val["inhibitPolicyMapping"])
+        if "inhibitPolicyMapping" in val
+        else None,
+    }
+    try:
+        # not sure why pylint complains about this line having kwargs from keyUsage
+        # pylint: disable=unexpected-keyword-arg
+        return cx509.PolicyConstraints(**args), critical
+    except (TypeError, ValueError) as err:
+        raise SaltInvocationError(err) from err
+
+
+def _create_inhibit_any_policy(val, **kwargs):
+    critical = "critical" in val if not isinstance(val, int) else False
+    if isinstance(val, str):
+        val, critical = _deserialize_openssl_confstring(val)
+        val = int(next(iter(val)))
+    try:
+        return (
+            cx509.InhibitAnyPolicy(val if isinstance(val, int) else val["value"]),
+            critical,
+        )
+    except KeyError as err:
+        raise SaltInvocationError(
+            f"Undefined required key for inhibitAnyPolicy: {err}"
+        ) from err
+    except (TypeError, ValueError) as err:
+        raise SaltInvocationError(err) from err
+
+
+def _create_name_constraints(val, **kwargs):
+    critical = "critical" in val
+    if isinstance(val, dict):
+        parsed = {}
+        for scope, constraints in val.items():
+            if scope not in ("permitted", "excluded"):
+                continue
             list_ = []
-            for x in val:
-                if isinstance(x, str) and ":" in x:
-                    k, v = x.split(":", maxsplit=1)
-                    list_.append((k.strip(), v.strip()))
-                elif isinstance(x, dict):
-                    list_.extend(list(x.items()))
-            val = tuple(list_)
-        elif isinstance(val, str):
-            val, critical = _deserialize_openssl_confstring(val, multiple=True)
-        parsed = _parse_general_names(val)
-        return cx509.SubjectAlternativeName(parsed), critical
-
-    if name in ["crlDistributionPoints", "freshestCRL"]:
-        critical = "critical" in val
-        if isinstance(val, str):
-            val, critical = _deserialize_openssl_confstring(val, multiple=True)
-        elif isinstance(val, list):
-            list_ = []
-            for x in val:
+            for x in constraints:
                 if isinstance(x, str) and ":" in x:
                     k, v = x.split(":", maxsplit=1)
                     list_.append((k.strip(), v.strip()))
                 elif x != "critical":
                     list_.append(x)
-            val = tuple(list_)
-        parsed = []
-        for dpoint in val:
-            fullname = relativename = crlissuer = reasons = None
-            if isinstance(dpoint, dict):
-                fullname = dpoint.get("fullname")
-                relativename = dpoint.get("relativename")
-                crlissuer = dpoint.get("crlissuer")
-                reasons = dpoint.get("reasons")
-                if fullname:
-                    if not isinstance(fullname, list):
-                        fullname = [fullname]
-                    fullname = (x.split(":", maxsplit=1) for x in fullname)
-                if relativename:
-                    relativename = _get_rdn(relativename)
-                if crlissuer:
-                    if not isinstance(crlissuer, list):
-                        crlissuer = [crlissuer]
-                    crlissuer = _parse_general_names(
-                        x.split(":", maxsplit=1) for x in crlissuer
-                    )
-                if reasons:
-                    try:
-                        reasons = frozenset(cx509.ReasonFlags(x) for x in reasons)
-                    except ValueError as err:
-                        raise SaltInvocationError(err) from err
-            else:
-                fullname = (dpoint,)
-            if fullname:
-                fullname = _parse_general_names(fullname)
-            try:
-                parsed.append(
-                    cx509.DistributionPoint(
-                        full_name=fullname,
-                        relative_name=relativename,
-                        reasons=reasons,
-                        crl_issuer=crlissuer,
-                    )
-                )
-            except (ValueError, TypeError) as err:
-                raise SaltInvocationError(err) from err
-        if name == "freshestCRL":
-            return cx509.FreshestCRL(parsed), False  # must be non-critical
-        return cx509.CRLDistributionPoints(parsed), critical
-
-    if name == "issuingDistributionPoint":
-        if not isinstance(val, dict):
-            raise SaltInvocationError("issuingDistributionPoint must be a dictionary")
-        critical = val.get("critical", False)
-        onlyuser = val.get("onlyuser", False)
-        onlyca = val.get("onlyCA", False)
-        onlyaa = val.get("onlyAA", False)
-        indirectcrl = val.get("indirectCRL", False)
-        fullname = val.get("fullname")
-        relativename = val.get("relativename")
-        onlysomereasons = val.get("onlysomereasons")
-        if fullname:
-            if not isinstance(fullname, list):
-                fullname = [fullname]
-            fullname = (x.split(":", maxsplit=1) for x in fullname)
-            fullname = _parse_general_names(fullname)
-        if relativename:
-            relativename = _get_rdn(relativename)
-        if onlysomereasons:
-            try:
-                onlysomereasons = frozenset(
-                    cx509.ReasonFlags(x) for x in onlysomereasons
-                )
-            except ValueError as err:
-                raise SaltInvocationError(err) from err
-        try:
-            return (
-                cx509.IssuingDistributionPoint(
-                    full_name=fullname,
-                    relative_name=relativename,
-                    only_contains_user_certs=onlyuser,
-                    only_contains_ca_certs=onlyca,
-                    only_some_reasons=onlysomereasons,
-                    indirect_crl=indirectcrl,
-                    only_contains_attribute_certs=onlyaa,
-                ),
-                critical,
-            )
-        except (ValueError, TypeError) as err:
-            raise SaltInvocationError(err) from err
-
-    if name == "certificatePolicies":
-        if isinstance(val, str):
-            try:
-                critical = val.startswith("critical")
-                policy_identifiers = (
-                    _get_oid(x.strip())
-                    for x in val.split(",")
-                    if x.strip() != "critical"
-                )
-                policy_information = [
-                    cx509.PolicyInformation(policy_identifier=p, policy_qualifiers=None)
-                    for p in policy_identifiers
-                ]
-                return cx509.CertificatePolicies(policy_information), critical
-            except CommandExecutionError as err:
-                raise SaltInvocationError(
-                    "certificatePolicies defined as string must be a "
-                    "comma-separated list of OID."
-                ) from err
-        critical = val.get("critical", False)
-        parsed = []
-        for polid, qualifiers in val.items():
-            if polid == "critical":
-                continue
-            parsed_qualifiers = []
-            for qual in qualifiers:
-                if isinstance(qual, str):
-                    # pointer to the practice statement published by the certificate authority
-                    parsed_qualifiers.append(qual)
-                    continue
-                notice = None
-                organization = qual.get("organization")
-                notice_numbers = qual.get("noticeNumbers")
-                text = qual.get("text")
-                if notice_numbers:
-                    try:
-                        notice = cx509.NoticeReference(
-                            organization=organization, notice_numbers=notice_numbers
-                        )
-                    except TypeError as err:
-                        raise CommandExecutionError(err) from err
-                    parsed_qualifiers.append(
-                        cx509.UserNotice(notice_reference=notice, explicit_text=text)
-                    )
-            parsed.append(
-                cx509.PolicyInformation(
-                    policy_identifier=_get_oid(polid),
-                    policy_qualifiers=parsed_qualifiers,
-                )
-            )
-        return cx509.CertificatePolicies(parsed), critical
-
-    if name == "policyConstraints":
-        critical = "critical" in val
-        if isinstance(val, str):
-            val, critical = _deserialize_openssl_confstring(val)
-        args = {
-            "require_explicit_policy": int(val["requireExplicitPolicy"])
-            if "requireExplicitPolicy" in val
-            else None,
-            "inhibit_policy_mapping": int(val["inhibitPolicyMapping"])
-            if "inhibitPolicyMapping" in val
-            else None,
+            parsed[scope] = tuple(list_)
+        val = parsed
+    elif isinstance(val, str):
+        items = tuple(x.strip().split(";") for x in val.split(","))
+        val = {
+            "permitted": [
+                x[1].split(":", maxsplit=1) for x in items if x[0] == "permitted"
+            ],
+            "excluded": [
+                x[1].split(":", maxsplit=1) for x in items if x[0] == "excluded"
+            ],
         }
-        try:
-            # not sure why pylint complains about this line having kwargs from keyUsage
-            # pylint: disable=unexpected-keyword-arg
-            return cx509.PolicyConstraints(**args), critical
-        except (TypeError, ValueError) as err:
-            raise SaltInvocationError(err) from err
+    args = {
+        "permitted_subtrees": _parse_general_names(val["permitted"])
+        if "permitted" in val
+        else None,
+        "excluded_subtrees": _parse_general_names(val["excluded"])
+        if "excluded" in val
+        else None,
+    }
+    if not any(args.values()):
+        raise SaltInvocationError("nameConstraints needs at least one definition")
+    return cx509.NameConstraints(**args), critical
 
-    if name == "inhibitAnyPolicy":
-        critical = "critical" in val if not isinstance(val, int) else False
-        if isinstance(val, str):
-            val, critical = _deserialize_openssl_confstring(val)
-            val = int(next(iter(val)))
-        try:
-            return (
-                cx509.InhibitAnyPolicy(val if isinstance(val, int) else val["value"]),
-                critical,
-            )
-        except KeyError as err:
-            raise SaltInvocationError(
-                f"Undefined required key for {name}: {err}"
-            ) from err
-        except (TypeError, ValueError) as err:
-            raise SaltInvocationError(err) from err
 
-    if name == "nameConstraints":
-        critical = "critical" in val
-        if isinstance(val, dict):
-            parsed = {}
-            for scope, constraints in val.items():
-                if scope not in ("permitted", "excluded"):
-                    continue
-                list_ = []
-                for x in constraints:
-                    if isinstance(x, str) and ":" in x:
-                        k, v = x.split(":", maxsplit=1)
-                        list_.append((k.strip(), v.strip()))
-                    elif x != "critical":
-                        list_.append(x)
-                parsed[scope] = tuple(list_)
-            val = parsed
-        elif isinstance(val, str):
-            items = tuple(x.strip().split(";") for x in val.split(","))
-            val = {
-                "permitted": [
-                    x[1].split(":", maxsplit=1) for x in items if x[0] == "permitted"
-                ],
-                "excluded": [
-                    x[1].split(":", maxsplit=1) for x in items if x[0] == "excluded"
-                ],
-            }
-        args = {
-            "permitted_subtrees": _parse_general_names(val["permitted"])
-            if "permitted" in val
-            else None,
-            "excluded_subtrees": _parse_general_names(val["excluded"])
-            if "excluded" in val
-            else None,
-        }
-        if not any(args.values()):
-            raise SaltInvocationError("nameConstraints needs at least one definition")
-        return cx509.NameConstraints(**args), critical
+def _create_no_check(val, **kwargs):
+    return cx509.OCSPNoCheck(), "critical" in str(val)
 
-    if name == "noCheck":
-        return cx509.OCSPNoCheck(), "critical" in str(val)
 
-    if name == "tlsfeature":
-        if isinstance(val, str):
-            val = [x.strip() for x in val.split(",")]
-        critical = "critical" in val
-        try:
-            types = [getattr(cx509.TLSFeatureType, x) for x in val if x != "critical"]
-        except ValueError as err:
-            raise SaltInvocationError(err) from err
-        return cx509.TLSFeature(types), critical
+def _create_tlsfeature(val, **kwargs):
+    if isinstance(val, str):
+        val = [x.strip() for x in val.split(",")]
+    critical = "critical" in val
+    try:
+        types = [getattr(cx509.TLSFeatureType, x) for x in val if x != "critical"]
+    except ValueError as err:
+        raise SaltInvocationError(err) from err
+    return cx509.TLSFeature(types), critical
 
-    if name == "nsComment":
-        raise SaltInvocationError("nsComment is currently not implemented.")
 
-    if name == "nsCertType":
-        raise SaltInvocationError("nsCertType is currently not implemented.")
+def _create_ns_comment(val, **kwargs):
+    raise SaltInvocationError("nsComment is currently not implemented.")
 
-    if name == "cRLNumber":
-        try:
-            return cx509.CRLNumber(int(val)), False
-        except ValueError as err:
-            raise SaltInvocationError(
-                "cRLNumber must be an integer and must be marked as non-critical"
-            ) from err
 
-    if name == "deltaCRLIndicator":
-        critical = "critical" in str(val)
-        val = re.findall(r"[\d]+", str(val))
-        if len(val) != 1:
-            raise SaltInvocationError(
-                "deltaCRLIndicator must contain a single integer pointing to a cRLNumber"
-            )
-        return cx509.DeltaCRLIndicator(int(val[0])), critical
+def _create_ns_cert_type(val, **kwargs):
+    raise SaltInvocationError("nsCertType is currently not implemented.")
 
-    if name == "CRLReason":
-        critical = False
-        if isinstance(val, str):
-            val, critical = _deserialize_openssl_confstring(val)
-        else:
-            if "critical" in val:
-                critical = True
-                val = [x for x in val if x != "critical"]
 
-        try:
-            return cx509.CRLReason(cx509.ReasonFlags(next(iter(val)))), critical
-        except ValueError as err:
-            raise SaltInvocationError(str(err)) from err
+def _create_crl_number(val, **kwargs):
+    try:
+        return cx509.CRLNumber(int(val)), False
+    except ValueError as err:
+        raise SaltInvocationError(
+            "cRLNumber must be an integer and must be marked as non-critical"
+        ) from err
 
-    if name == "invalidityDate":
-        if not isinstance(val, str):
-            raise SaltInvocationError("invalidityDate must be a string")
-        critical = val.startswith("critical")
-        if critical:
-            val = val.split(" ", maxsplit=1)[1]
-        try:
-            return (
-                cx509.InvalidityDate(datetime.datetime.strptime(val, TIME_FMT)),
-                critical,
-            )
-        except ValueError as err:
-            raise SaltInvocationError(str(err)) from err
 
-    raise CommandExecutionError(f"Unknown extension {name}")
+def _create_delta_crl_indicator(val, **kwargs):
+    critical = "critical" in str(val)
+    val = re.findall(r"[\d]+", str(val))
+    if len(val) != 1:
+        raise SaltInvocationError(
+            "deltaCRLIndicator must contain a single integer pointing to a cRLNumber"
+        )
+    return cx509.DeltaCRLIndicator(int(val[0])), critical
+
+
+def _create_crl_reason(val, **kwargs):
+    critical = False
+    if isinstance(val, str):
+        val, critical = _deserialize_openssl_confstring(val)
+    else:
+        if "critical" in val:
+            critical = True
+            val = [x for x in val if x != "critical"]
+
+    try:
+        return cx509.CRLReason(cx509.ReasonFlags(next(iter(val)))), critical
+    except ValueError as err:
+        raise SaltInvocationError(str(err)) from err
+
+
+def _create_invalidity_date(val, **kwargs):
+    if not isinstance(val, str):
+        raise SaltInvocationError("invalidityDate must be a string")
+    critical = val.startswith("critical")
+    if critical:
+        val = val.split(" ", maxsplit=1)[1]
+    try:
+        return (
+            cx509.InvalidityDate(datetime.datetime.strptime(val, TIME_FMT)),
+            critical,
+        )
+    except ValueError as err:
+        raise SaltInvocationError(str(err)) from err
+
+
+# Map canonical name of extension to builder function.
+# This is done globally to avoid having to instantiate this
+# over and over.
+EXTENSION_BUILDERS = immutabletypes.freeze(
+    {
+        "basicConstraints": _create_basic_constraints,
+        "keyUsage": _create_key_usage,
+        "extendedKeyUsage": _create_extended_key_usage,
+        "subjectKeyIdentifier": _create_subject_key_identifier,
+        "authorityKeyIdentifier": _create_authority_key_identifier,
+        "issuerAltName": _create_issuer_alt_name,
+        "certificateIssuer": _create_certificate_issuer,
+        "authorityInfoAccess": _create_authority_info_access,
+        "subjectAltName": _create_subject_alt_name,
+        "crlDistributionPoints": _create_crl_distribution_points,
+        "freshestCRL": _create_freshest_crl,
+        "issuingDistributionPoint": _create_issuing_distribution_point,
+        "certificatePolicies": _create_certificate_policies,
+        "policyConstraints": _create_policy_constraints,
+        "inhibitAnyPolicy": _create_inhibit_any_policy,
+        "nameConstraints": _create_name_constraints,
+        "noCheck": _create_no_check,
+        "tlsfeature": _create_tlsfeature,
+        "nsComment": _create_ns_comment,
+        "nsCertType": _create_ns_cert_type,
+        "cRLNumber": _create_crl_number,
+        "deltaCRLIndicator": _create_delta_crl_indicator,
+        "CRLReason": _create_crl_reason,
+        "invalidityDate": _create_invalidity_date,
+    }
+)
 
 
 def _deserialize_openssl_confstring(conf, multiple=False):
@@ -1720,7 +1820,7 @@ def _get_dn(dn):
         return cx509.Name([_get_rdn(x) for x in dn])
     elif isinstance(dn, dict):
         parsed = []
-        for name, oid in NAME_OID.items():
+        for name, oid in NAME_ATTRS_OID.items():
             if name in dn:
                 parsed.append(cx509.NameAttribute(oid, dn[name]))
         return cx509.Name(parsed)
@@ -1770,233 +1870,239 @@ def render_extension(ext):
     Render an Extension instance to a dict for informational purposes
     """
     ret = {"critical": ext.critical}
-    if isinstance(ext.value, cx509.BasicConstraints):
-        ret.update({"ca": ext.value.ca, "pathlen": ext.value.path_length})
-        return ret
-
-    if isinstance(ext.value, cx509.KeyUsage):
-        ret.update(
-            {
-                "cRLSign": ext.value.crl_sign,
-                "dataEncipherment": ext.value.data_encipherment,
-                "decipherOnly": ext.value.decipher_only
-                if ext.value.key_agreement
-                else False,
-                "digitalSignature": ext.value.digital_signature,
-                "encipherOnly": ext.value.encipher_only
-                if ext.value.key_agreement
-                else False,
-                "keyAgreement": ext.value.key_agreement,
-                "keyCertSign": ext.value.key_cert_sign,
-                "keyEncipherment": ext.value.key_encipherment,
-                "nonRepudiation": ext.value.content_commitment,
-            }
-        )
-        return ret
-
-    if isinstance(ext.value, cx509.ExtendedKeyUsage):
-        # this does not account for unnamed OIDs
-        try:
-            usages = [
-                x._name if x._name != "Unknown OID" else x.dotted_string
-                for x in ext.value._usages or []
-            ]
-        except AttributeError:
-            # best effort in case x._name becomes undefined at some point
-            usages = re.findall(
-                r"\<ObjectIdentifier\(oid=[\d\.]+, name=([\w]+)\)\>", str(ext.value)
-            )
-            usages = [x[1] if "Unknown OID" != x[1] else x[0] for x in usages]
-        ret["value"] = usages
-        return ret
-
-    if isinstance(ext.value, cx509.SubjectKeyIdentifier):
-        ret["value"] = pretty_hex(ext.value.digest)
-        return ret
-
-    if isinstance(ext.value, cx509.AuthorityKeyIdentifier):
-        ret.update(
-            {
-                "keyid": pretty_hex(ext.value.key_identifier)
-                if ext.value.key_identifier
-                else None,
-                "issuer": [render_gn(x) for x in ext.value.authority_cert_issuer or []]
-                or None,
-                "issuer_sn": dec2hex(ext.value.authority_cert_serial_number)
-                if ext.value.authority_cert_serial_number
-                else None,
-            }
-        )
-        return ret
-
-    if isinstance(
-        ext.value,
-        (
-            cx509.IssuerAlternativeName,
-            cx509.CertificateIssuer,
-            cx509.SubjectAlternativeName,
-        ),
-    ):
-        try:
-            ret["value"] = [
-                render_gn(x) for x in ext.value._general_names._general_names or []
-            ]
-        except AttributeError:
-            # best effort in case ext.value._general_names._general_names
-            # becomes undefined at some point
-            prefixes = {
-                "DNSName": "dns",
-                "RFC822Name": "email",
-                "UniformResourceIdentifier": "url",
-                "RegisteredID": "rid",
-                "IPAddress": "ip",
-                "DirectoryName": "dirName",
-            }
-            ret["value"] = [
-                f"{prefixes[typ]}:{gn}"
-                for typ, gn in re.findall(
-                    rf"\<({'|'.join(prefixes)})\(value='([^']+)'\)\>",
-                    str(ext.value),
-                )
-            ]
-        return ret
-
-    if isinstance(ext.value, cx509.AuthorityInformationAccess):
-        try:
-            ret["value"] = []
-            for description in ext.value._descriptions:
-                ret["value"].append(
-                    {
-                        description.access_method._name
-                        if description.access_method._name != "Unknown OID"
-                        else description.access_method.dotted_string: render_gn(
-                            description.access_location.value
-                        )
-                    }
-                )
-        except AttributeError:
-            ret["value"] = str(ext.value)
-        return ret
-
-    if isinstance(ext.value, (cx509.CRLDistributionPoints, cx509.FreshestCRL)):
-        try:
-            dpoints = []
-            for dpoint in ext.value._distribution_points:
-                dpoints.append(
-                    {
-                        "crlissuer": [render_gn(x) for x in dpoint.crl_issuer or []],
-                        "fullname": [render_gn(x) for x in dpoint.full_name or []],
-                        "reasons": list(sorted(x.value for x in dpoint.reasons or [])),
-                        "relativename": dpoint.relative_name.rfc4514_string()
-                        if dpoint.relative_name
-                        else None,
-                    }
-                )
-            ret["value"] = dpoints
-        except AttributeError:
-            ret["value"] = str(ext.value)
-        return ret
-
-    if isinstance(ext.value, cx509.IssuingDistributionPoint):
-        ret.update(
-            {
-                "fullname": [render_gn(x) for x in ext.value.full_name or []],
-                "onysomereasons": list(
-                    sorted(x.value for x in ext.value.only_some_reasons or [])
-                ),
-                "relativename": ext.value.relative_name.rfc4514_string()
-                if ext.value.relative_name
-                else None,
-                "onlyuser": ext.value.only_contains_user_certs,
-                "onlyCA": ext.value.only_contains_ca_certs,
-                "onlyAA": ext.value.only_contains_attribute_certs,
-                "indirectCRL": ext.value.indirect_crl,
-            }
-        )
-        return ret
-
-    if isinstance(ext.value, cx509.CertificatePolicies):
-        try:
-            policies = []
-            for policy in ext.value._policies:
-                polid = policy.policy_identifier._name
-                if polid == "Unknown OID":
-                    polid = policy.policy_identifier.dotted_string
-                qualifiers = []
-                for notice in policy.policy_qualifiers or []:
-                    if isinstance(notice, str):
-                        qualifiers.append({"practice_statement": notice})
-                        continue
-                    organization = notice_numbers = None
-                    if notice.notice_reference:
-                        organization = notice.notice_reference.organization
-                        notice_numbers = notice.notice_reference.notice_numbers
-                    qualifiers.append(
-                        {
-                            "organizataion": organization,
-                            "notice_numbers": notice_numbers,
-                            "explicit_text": notice.explicit_text,
-                        }
-                    )
-                policies.append({polid: qualifiers})
-            ret["value"] = policies
-        except AttributeError:
-            ret["value"] = str(ext.value)
-        return ret
-
-    if isinstance(ext.value, cx509.PolicyConstraints):
-        ret.update(
-            {
-                "inhibitPolicyMapping": ext.value.inhibit_policy_mapping,
-                "requireExplicitPolicy": ext.value.require_explicit_policy,
-            }
-        )
-        return ret
-
-    if isinstance(ext.value, cx509.InhibitAnyPolicy):
-        ret["value"] = ext.value.skip_certs
-        return ret
-
-    if isinstance(ext.value, cx509.NameConstraints):
-        ret.update(
-            {
-                "excluded": [render_gn(x) for x in ext.value.excluded_subtrees or []],
-                "permitted": [render_gn(x) for x in ext.value.permitted_subtrees or []],
-            }
-        )
-        return ret
-
-    if isinstance(ext.value, cx509.OCSPNoCheck):
-        ret["value"] = True
-        return ret
-
-    if isinstance(ext.value, cx509.TLSFeature):
-        try:
-            ret["value"] = [x.name for x in ext.value._features]
-        except AttributeError:
-            features = []
-            if "status_request" in str(ext.value):
-                features.append("status_request")
-            if "status_request_v2" in str(ext.value):
-                features.append("status_request_v2")
-            ret["value"] = features
-        return ret
-
-    if isinstance(ext.value, cx509.CRLNumber):
-        ret["value"] = ext.value.crl_number
-        return ret
-
-    if isinstance(ext.value, cx509.DeltaCRLIndicator):
-        ret["value"] = ext.value.crl_number
-        return ret
-
-    if isinstance(ext.value, cx509.CRLReason):
-        ret["value"] = ext.value.reason.value
-        return ret
-
-    if isinstance(ext.value, cx509.InvalidityDate):
-        ret["value"] = ext.value.invalidity_date.strftime(TIME_FMT)
-        return ret
-
-    ret["value"] = str(ext.value)
+    typ = type(ext.value)
+    if typ in EXTENSION_RENDERERS:
+        ret.update(EXTENSION_RENDERERS[typ](ext))
+    else:
+        ret["value"] = str(ext.value)
     return ret
+
+
+def _render_basic_constraints(ext):
+    return {"ca": ext.value.ca, "pathlen": ext.value.path_length}
+
+
+def _render_key_usage(ext):
+    return {
+        "cRLSign": ext.value.crl_sign,
+        "dataEncipherment": ext.value.data_encipherment,
+        "decipherOnly": ext.value.decipher_only if ext.value.key_agreement else False,
+        "digitalSignature": ext.value.digital_signature,
+        "encipherOnly": ext.value.encipher_only if ext.value.key_agreement else False,
+        "keyAgreement": ext.value.key_agreement,
+        "keyCertSign": ext.value.key_cert_sign,
+        "keyEncipherment": ext.value.key_encipherment,
+        "nonRepudiation": ext.value.content_commitment,
+    }
+
+
+def _render_extended_key_usage(ext):
+    # this does not account for unnamed OIDs
+    try:
+        usages = [
+            x._name if x._name != "Unknown OID" else x.dotted_string
+            for x in ext.value._usages or []
+        ]
+    except AttributeError:
+        # best effort in case x._name becomes undefined at some point
+        usages = re.findall(
+            r"\<ObjectIdentifier\(oid=[\d\.]+, name=([\w]+)\)\>", str(ext.value)
+        )
+        usages = [x[1] if "Unknown OID" != x[1] else x[0] for x in usages]
+    return {"value": usages}
+
+
+def _render_subject_key_identifier(ext):
+    return {"value": pretty_hex(ext.value.digest)}
+
+
+def _render_authority_key_identifier(ext):
+    return {
+        "keyid": pretty_hex(ext.value.key_identifier)
+        if ext.value.key_identifier
+        else None,
+        "issuer": [render_gn(x) for x in ext.value.authority_cert_issuer or []] or None,
+        "issuer_sn": dec2hex(ext.value.authority_cert_serial_number)
+        if ext.value.authority_cert_serial_number
+        else None,
+    }
+
+
+def _render_general_names(ext):
+    try:
+        rendered = [render_gn(x) for x in ext.value._general_names._general_names or []]
+    except AttributeError:
+        # best effort in case ext.value._general_names._general_names
+        # becomes undefined at some point
+        prefixes = {
+            "DNSName": "dns",
+            "RFC822Name": "email",
+            "UniformResourceIdentifier": "url",
+            "RegisteredID": "rid",
+            "IPAddress": "ip",
+            "DirectoryName": "dirName",
+        }
+        rendered = [
+            f"{prefixes[typ]}:{gn}"
+            for typ, gn in re.findall(
+                rf"\<({'|'.join(prefixes)})\(value='([^']+)'\)\>",
+                str(ext.value),
+            )
+        ]
+    return {"value": rendered}
+
+
+def _render_authority_info_access(ext):
+    rendered = []
+    try:
+        for description in ext.value._descriptions:
+            rendered.append(
+                {
+                    description.access_method._name
+                    if description.access_method._name != "Unknown OID"
+                    else description.access_method.dotted_string: render_gn(
+                        description.access_location.value
+                    )
+                }
+            )
+    except AttributeError:
+        rendered = str(ext.value)
+    return {"value": rendered}
+
+
+def _render_distribution_points(ext):
+    dpoints = []
+    try:
+        for dpoint in ext.value._distribution_points:
+            dpoints.append(
+                {
+                    "crlissuer": [render_gn(x) for x in dpoint.crl_issuer or []],
+                    "fullname": [render_gn(x) for x in dpoint.full_name or []],
+                    "reasons": list(sorted(x.value for x in dpoint.reasons or [])),
+                    "relativename": dpoint.relative_name.rfc4514_string()
+                    if dpoint.relative_name
+                    else None,
+                }
+            )
+    except AttributeError:
+        dpoints = str(ext.value)
+    return {"value": dpoints}
+
+
+def _render_issuing_distribution_point(ext):
+    return {
+        "fullname": [render_gn(x) for x in ext.value.full_name or []],
+        "onysomereasons": list(
+            sorted(x.value for x in ext.value.only_some_reasons or [])
+        ),
+        "relativename": ext.value.relative_name.rfc4514_string()
+        if ext.value.relative_name
+        else None,
+        "onlyuser": ext.value.only_contains_user_certs,
+        "onlyCA": ext.value.only_contains_ca_certs,
+        "onlyAA": ext.value.only_contains_attribute_certs,
+        "indirectCRL": ext.value.indirect_crl,
+    }
+
+
+def _render_certificate_policies(ext):
+    policies = []
+    try:
+        for policy in ext.value._policies:
+            polid = policy.policy_identifier._name
+            if polid == "Unknown OID":
+                polid = policy.policy_identifier.dotted_string
+            qualifiers = []
+            for notice in policy.policy_qualifiers or []:
+                if isinstance(notice, str):
+                    qualifiers.append({"practice_statement": notice})
+                    continue
+                organization = notice_numbers = None
+                if notice.notice_reference:
+                    organization = notice.notice_reference.organization
+                    notice_numbers = notice.notice_reference.notice_numbers
+                qualifiers.append(
+                    {
+                        "organizataion": organization,
+                        "notice_numbers": notice_numbers,
+                        "explicit_text": notice.explicit_text,
+                    }
+                )
+            policies.append({polid: qualifiers})
+    except AttributeError:
+        policies = str(ext.value)
+    return {"value": policies}
+
+
+def _render_policy_constraints(ext):
+    return {
+        "inhibitPolicyMapping": ext.value.inhibit_policy_mapping,
+        "requireExplicitPolicy": ext.value.require_explicit_policy,
+    }
+
+
+def _render_inhibit_any_policy(ext):
+    return {"value": ext.value.skip_certs}
+
+
+def _render_name_constraints(ext):
+    return {
+        "excluded": [render_gn(x) for x in ext.value.excluded_subtrees or []],
+        "permitted": [render_gn(x) for x in ext.value.permitted_subtrees or []],
+    }
+
+
+def _render_no_check(ext):
+    return {"value": True}
+
+
+def _render_tlsfeature(ext):
+    try:
+        features = [x.name for x in ext.value._features]
+    except AttributeError:
+        features = []
+        if "status_request" in str(ext.value):
+            features.append("status_request")
+        if "status_request_v2" in str(ext.value):
+            features.append("status_request_v2")
+    return {"value": features}
+
+
+def _render_crl_number(ext):
+    return {"value": ext.value.crl_number}
+
+
+def _render_crl_reason(ext):
+    return {"value": ext.value.reason.value}
+
+
+def _render_invalidity_date(ext):
+    return {"value": ext.value.invalidity_date.strftime(TIME_FMT)}
+
+
+EXTENSION_RENDERERS = immutabletypes.freeze(
+    {
+        cx509.BasicConstraints: _render_basic_constraints,
+        cx509.KeyUsage: _render_key_usage,
+        cx509.ExtendedKeyUsage: _render_extended_key_usage,
+        cx509.SubjectKeyIdentifier: _render_subject_key_identifier,
+        cx509.AuthorityKeyIdentifier: _render_authority_key_identifier,
+        cx509.IssuerAlternativeName: _render_general_names,
+        cx509.CertificateIssuer: _render_general_names,
+        cx509.AuthorityInformationAccess: _render_authority_info_access,
+        cx509.SubjectAlternativeName: _render_general_names,
+        cx509.CRLDistributionPoints: _render_distribution_points,
+        cx509.FreshestCRL: _render_distribution_points,
+        cx509.IssuingDistributionPoint: _render_issuing_distribution_point,
+        cx509.CertificatePolicies: _render_certificate_policies,
+        cx509.PolicyConstraints: _render_policy_constraints,
+        cx509.InhibitAnyPolicy: _render_inhibit_any_policy,
+        cx509.NameConstraints: _render_name_constraints,
+        cx509.OCSPNoCheck: _render_no_check,
+        cx509.TLSFeature: _render_tlsfeature,
+        cx509.CRLNumber: _render_crl_number,
+        cx509.DeltaCRLIndicator: _render_crl_number,
+        cx509.CRLReason: _render_crl_reason,
+        cx509.InvalidityDate: _render_invalidity_date,
+    }
+)

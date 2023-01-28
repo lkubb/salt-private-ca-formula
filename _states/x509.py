@@ -191,6 +191,7 @@ import re
 
 import salt.exceptions
 import salt.utils.versions
+from salt.features import features
 
 try:
     from M2Crypto.RSA import RSAError
@@ -204,7 +205,7 @@ def __virtual__():
     """
     only load this module if the corresponding execution module is loaded
     """
-    if __opts__.get("x509_v2"):
+    if features.get("x509_v2"):
         return (False, "Superseded, using x509_v2")
     if "x509.get_pem_entry" in __salt__:
         salt.utils.versions.warn_until(

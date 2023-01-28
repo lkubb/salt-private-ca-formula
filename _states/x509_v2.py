@@ -2,7 +2,7 @@
 Manage X.509 certificates
 =========================
 
-.. versionadded:: 3006
+.. versionadded:: 3006.0
 
     This module represents a complete rewrite of the original ``x509`` modules
     and is named ``x509_v2`` since it introduces breaking changes.
@@ -107,7 +107,8 @@ the certificate to the mine, where it can be easily retrieved by other minions.
     # /srv/salt/x509.conf
 
     # enable x509_v2
-    x509_v2: true
+    features:
+      x509_v2: true
 
     # publish the CA certificate to the mine
     mine_functions:
@@ -187,6 +188,7 @@ import os.path
 
 import salt.utils.files
 from salt.exceptions import CommandExecutionError, SaltInvocationError
+from salt.features import features
 from salt.state import STATE_INTERNAL_KEYWORDS as _STATE_INTERNAL_KEYWORDS
 
 try:
@@ -209,18 +211,18 @@ __virtualname__ = "x509"
 def __virtual__():
     if not HAS_CRYPTOGRAPHY:
         return (False, "Could not load cryptography")
-    if not __opts__.get("x509_v2"):
+    if not features.get("x509_v2"):
         return (
             False,
             "x509_v2 needs to be explicitly enabled by setting `x509_v2: true` "
-            "in the minion configuration until Salt 3008 (Argon).",
+            "in the minion configuration value `features` until Salt 3008 (Argon).",
         )
     return __virtualname__
 
 
 def certificate_managed(
     name,
-    days_remaining=7,
+    days_remaining=None,
     ca_server=None,
     signing_policy=None,
     encoding="pem",
@@ -239,14 +241,14 @@ def certificate_managed(
     serial_number=None,
     not_before=None,
     not_after=None,
-    days_valid=30,
+    days_valid=None,
     pkcs12_passphrase=None,
     pkcs12_encryption_compat=False,
     pkcs12_friendlyname=None,
     **kwargs,
 ):
     """
-    Make sure an X.509 certificate is present as specified.
+    Ensure an X.509 certificate is present as specified.
 
     This function accepts the same arguments as :py:func:`x509.create_certificate <salt.modules.x509_v2.create_certificate>`,
     as well as most ones for `:py:func:`file.managed <salt.states.file.managed>`.
@@ -256,7 +258,8 @@ def certificate_managed(
 
     days_remaining
         The certificate will be recreated once the remaining certificate validity
-        period is less than this number of days. Defaults to 7.
+        period is less than this number of days.
+        Defaults to ``90`` (until v3009) or ``7`` (from v3009 onwards).
 
     ca_server
         Request a remotely signed certificate from ca_server. For this to
@@ -359,7 +362,8 @@ def certificate_managed(
 
     days_valid
         If ``not_after`` is unspecified, the number of days from the time of issuance
-        the certificate should be valid for. Defaults to ``30``.
+        the certificate should be valid for.
+        Defaults to ``365`` (until v3009) or ``30`` (from v3009 onwards).
 
     pkcs12_passphrase
         When encoding a certificate as ``pkcs12``, encrypt it with this passphrase.
@@ -382,6 +386,35 @@ def certificate_managed(
         :py:func:`x509.create_certificate <salt.modules.x509_v2.create_certificate>`
         for an overview.
     """
+    # Deprecation checks vs the old x509 module
+    if days_valid is None and not_after is None:
+        try:
+            salt.utils.versions.warn_until(
+                "Potassium",
+                "The default value for `days_valid` will change to 30. Please adapt your code accordingly.",
+            )
+            days_valid = 365
+        except RuntimeError:
+            days_valid = 30
+
+    if days_remaining is None:
+        try:
+            salt.utils.versions.warn_until(
+                "Potassium",
+                "The default value for `days_remaining` will change to 7. Please adapt your code accordingly.",
+            )
+            days_remaining = 90
+        except RuntimeError:
+            days_remaining = 7
+
+    if "algorithm" in kwargs:
+        salt.utils.versions.warn_until(
+            "Potassium",
+            "`algorithm` has been renamed to `digest`. Please update your code.",
+        )
+        digest = kwargs.pop("algorithm")
+    kwargs = x509util.ensure_cert_kwargs_compat(kwargs)
+
     ret = {
         "name": name,
         "changes": {},
@@ -623,18 +656,18 @@ def crl_managed(
     name,
     signing_private_key,
     revoked,
-    days_remaining=7,
+    days_remaining=None,
     signing_cert=None,
     signing_private_key_passphrase=None,
     include_expired=False,
-    days_valid=100,
+    days_valid=None,
     digest="sha256",
     encoding="pem",
     extensions=None,
     **kwargs,
 ):
     """
-    Make sure a certificate revocation list is present as specified.
+    Ensure a certificate revocation list is present as specified.
 
     This function accepts the same arguments as :py:func:`x509.create_crl <salt.modules.x509_v2.create_crl>`,
     as well as most ones for `:py:func:`file.managed <salt.states.file.managed>`.
@@ -683,7 +716,9 @@ def crl_managed(
 
     days_remaining
         The certificate revocation list will be recreated once the remaining
-        CRL validity period is less than this number of days. Defaults to 7.
+        CRL validity period is less than this number of days.
+        Defaults to ``30`` (until v3009) or ``3`` (from v3009 onwards).
+        Set to 0 to disable automatic renewal without anything changing.
 
     signing_cert
         The CA certificate to be used for signing the issued certificate.
@@ -695,8 +730,8 @@ def crl_managed(
         Also include already expired certificates in the CRL. Defaults to false.
 
     days_valid
-        The number of days that the CRL should be valid. This sets the ``Next Update``
-        field in the CRL. Defaults to 100.
+        The number of days that the CRL should be valid for. This sets the ``Next Update``
+        field in the CRL. Defaults to ``100`` (until v3009) or ``7`` (from v3009 onwards).
 
     digest
         The hashing algorithm to use for the signature. Valid values are:
@@ -706,7 +741,7 @@ def crl_managed(
 
     encoding
         Specify the encoding of the resulting certificate revocation list.
-        It can serialized as a ``pem`` text or binary ``der`` file.
+        It can be serialized as a ``pem`` text or binary ``der`` file.
         Defaults to ``pem``.
 
     extensions
@@ -740,6 +775,51 @@ def crl_managed(
             - extensions:
                 cRLNumber: auto
     """
+    if "text" in kwargs:
+        salt.utils.versions.kwargs_warn_until(["text"], "Potassium")
+        kwargs.pop("text")
+
+    if days_valid is None:
+        try:
+            salt.utils.versions.warn_until(
+                "Potassium",
+                "The default value for `days_valid` will change to 7. Please adapt your code accordingly.",
+            )
+            days_valid = 100
+        except RuntimeError:
+            days_valid = 7
+
+    if days_remaining is None:
+        try:
+            salt.utils.versions.warn_until(
+                "Potassium",
+                "The default value for `days_remaining` will change to 3. Please adapt your code accordingly.",
+            )
+            days_remaining = 30
+        except RuntimeError:
+            days_remaining = 3
+
+    revoked_parsed = []
+    for rev in revoked:
+        parsed = {}
+        if len(rev) == 1 and isinstance(rev[next(iter(rev))], list):
+            salt.utils.versions.warn_until(
+                "Potassium",
+                "Revoked certificates should be specified as a simple list of dicts.",
+            )
+            for val in rev[next(iter(rev))]:
+                parsed.update(val)
+        if "reason" in (parsed or rev):
+            salt.utils.versions.warn_until(
+                "Potassium",
+                "The `reason` parameter for revoked certificates should be specified in extensions:CRLReason.",
+            )
+            salt.utils.dictupdate.set_dict_key_value(
+                (parsed or rev), "extensions:CRLReason", (parsed or rev).pop("reason")
+            )
+        revoked_parsed.append(parsed or rev)
+    revoked = revoked_parsed
+
     ret = {
         "name": name,
         "changes": {},
@@ -939,7 +1019,7 @@ def csr_managed(
     **kwargs,
 ):
     """
-    Make sure a certificate signing request is present as specified.
+    Ensure a certificate signing request is present as specified.
 
     This function accepts the same arguments as :py:func:`x509.create_csr <salt.modules.x509_v2.create_csr>`,
     as well as most ones for :py:func:`file.managed <salt.states.file.managed>`.
@@ -962,7 +1042,7 @@ def csr_managed(
 
     encoding
         Specify the encoding of the resulting certificate revocation list.
-        It can serialized as a ``pem`` text or binary ``der`` file.
+        It can be serialized as a ``pem`` text or binary ``der`` file.
         Defaults to ``pem``.
 
     kwargs
@@ -973,6 +1053,15 @@ def csr_managed(
         (``authorityInfoAccess``, ``authorityKeyIdentifier``,
         ``issuerAltName``, ``crlDistributionPoints``).
     """
+    # Deprecation checks vs the old x509 module
+    if "algorithm" in kwargs:
+        salt.utils.versions.warn_until(
+            "Potassium",
+            "`algorithm` has been renamed to `digest`. Please update your code.",
+        )
+        digest = kwargs.pop("algorithm")
+    kwargs = x509util.ensure_cert_kwargs_compat(kwargs)
+
     ret = {
         "name": name,
         "changes": {},
@@ -1147,7 +1236,10 @@ def pem_managed(name, text, **kwargs):
     if extra_args:
         raise SaltInvocationError(f"Unrecognized keyword arguments: {list(extra_args)}")
 
-    file_args["contents"] = __salt__["x509.get_pem_entry"](text=text)
+    try:
+        file_args["contents"] = __salt__["x509.get_pem_entry"](text=text)
+    except (CommandExecutionError, SaltInvocationError) as err:
+        return {"name": name, "result": False, "comment": str(err), "changes": {}}
     return _file_managed(name, **file_args)
 
 
@@ -1163,7 +1255,7 @@ def private_key_managed(
     **kwargs,
 ):
     """
-    Make sure a private key is present as specified.
+    Ensure a private key is present as specified.
 
     This function accepts the same arguments as :py:func:`x509.create_private_key <salt.modules.x509_v2.create_private_key>`,
     as well as most ones for :py:func:`file.managed <salt.states.file.managed>`.
@@ -1228,6 +1320,22 @@ def private_key_managed(
               - x509: /etc/pki/www.crt
         {%- endif %}
     """
+    # Deprecation checks vs the old x509 module
+    if "bits" in kwargs:
+        salt.utils.versions.warn_until(
+            "Potassium",
+            "`bits` has been renamed to `keysize`. Please update your code.",
+        )
+        keysize = kwargs.pop("bits")
+
+    ignored_params = {"cipher", "verbose", "text"}.intersection(
+        kwargs
+    )  # path, overwrite
+    if ignored_params:
+        salt.utils.versions.kwargs_warn_until(ignored_params, "Potassium")
+        for x in ignored_params:
+            kwargs.pop(x)
+
     ret = {
         "name": name,
         "changes": {},
@@ -1237,7 +1345,11 @@ def private_key_managed(
     current = current_encoding = None
     changes = {}
     verb = "create"
-    file_args, _ = _split_file_kwargs(kwargs)
+    file_args, extra_args = _split_file_kwargs(kwargs)
+
+    if extra_args:
+        raise SaltInvocationError(f"Unrecognized keyword arguments: {list(extra_args)}")
+
     if not file_args.get("mode"):
         # ensure secure defaults
         file_args["mode"] = "0400"
@@ -1655,9 +1767,9 @@ def _getattr_safe(obj, attr):
     try:
         return getattr(obj, attr)
     except AttributeError as err:
-        # since we cannot get the certificate object without signing,
+        # Since we cannot get the certificate object without signing,
         # we need to compare attributes marked as internal. At least
-        # convert possible exceptions into some description
+        # convert possible exceptions into some description.
         raise CommandExecutionError(
             f"Could not get attribute {attr} from {obj.__class__.__name__}. "
             "Did the internal API of cryptography change?"
@@ -1673,8 +1785,8 @@ def _compareattr_safe(obj, attr, comp):
 
 def _safe_atomic_write(dst, data, backup):
     """
-    create temporary file with only user r/w perms and atomically
-    copy it to the destination, honoring backup
+    Create a temporary file with only user r/w perms and atomically
+    copy it to the destination, honoring ``backup``.
     """
     tmp = salt.utils.files.mkstemp(prefix=salt.utils.files.TEMPFILE_PREFIX)
     with salt.utils.files.fopen(tmp, "wb") as tmp_:
