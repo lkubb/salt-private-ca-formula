@@ -1,16 +1,26 @@
-# -*- coding: utf-8 -*-
 # vim: ft=yaml
 # yamllint disable rule:comments-indentation
 ---
 pca:
-
+    # Settings for your CA
   ca:
+      # Extra parameters for `x509.certificate_managed`/`x509.csr_managed`,
+      # depending on `self_signed`.
     extra_info: {}
+      # Asymmetric algorithm to use (rsa/ec/ed25519/ed448)
     key_algo: rsa
+      # Key size of the CA key. Relevant for ec (selects curve) and rsa
     keysize: 4096
+      # CN of the CA certificate
     name: ''
+      # Whether to generate a self-signed certificate
     self_signed: true
+      # How many days the self-signed certificate should be valid for
     self_signed_valid: 3655
+
+    # This formula assumes the new, `x509_v2` modules.
+    # Additional functionality can be enabled by upgrading the
+    # cryptography library. Enable automatic updates for it:
   upgrade_cryptography: false
 
   lookup:
@@ -21,32 +31,3 @@ pca:
       cryptography: cryptography
       pkg: python3-pip
     pki_dir: /etc/pki
-
-  tofs:
-      # The files_switch key serves as a selector for alternative
-      # directories under the formula files directory. See TOFS pattern
-      # doc for more info.
-      # Note: Any value not evaluated by `config.get` will be used literally.
-      # This can be used to set custom paths, as many levels deep as required.
-    files_switch:
-      - any/path/can/be/used/here
-      - id
-      - roles
-      - osfinger
-      - os
-      - os_family
-
-      # All aspects of path/file resolution are customisable using the options below.
-      # This is unnecessary in most cases; there are sensible defaults.
-      # Default path: salt://< path_prefix >/< dirs.files >/< dirs.default >
-      # I.e.: salt://pca/files/default
-      # path_prefix: template_alt
-      # dirs:
-      #   files: files_alt
-      #   default: default_alt
-      # The entries under `source_files` are prepended to the default source files
-      # given for the state
-    source_files:
-      pca-config-file-file-managed:
-        - 'example_alt.tmpl'
-        - 'example_alt.tmpl.jinja'

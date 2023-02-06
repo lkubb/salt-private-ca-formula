@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # vim: ft=yaml
 ---
 pca:
@@ -7,6 +6,8 @@ pca:
     # Just for testing purposes
     winner: lookup
     added_in_lookup: lookup_value
+    pkg:
+      name: python3-cryptography
     ca_bundle_path: /etc/pki/ca-trust/source/anchors
     ca_bundle_update_cmd: update-ca-trust
     ca_name: salt_ca

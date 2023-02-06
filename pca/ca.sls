@@ -1,7 +1,13 @@
-# -*- coding: utf-8 -*-
 # vim: ft=sls
 
-{%- set tplroot = tpldir.split('/')[0] %}
+{#-
+    Configures a certificate authority:
+    * creates a root certificate or a CSR, if not ``ca:self_signed``
+    * if not ``ca:self_signed``, saves the configured root certificate
+    * publishes the root certificate to the mine
+#}
+
+{%- set tplroot = tpldir.split("/")[0] %}
 {%- set sls_base = tplroot ~ ".base" %}
 {%- from tplroot ~ "/map.jinja" import mapdata as pca with context %}
 
