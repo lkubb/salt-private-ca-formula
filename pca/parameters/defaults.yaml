@@ -19,6 +19,7 @@ values:
     key_algo: rsa
     keysize: 4096
     name: ''
+    root_crt: ''
     self_signed: true
     self_signed_valid: 3655
   upgrade_cryptography: false

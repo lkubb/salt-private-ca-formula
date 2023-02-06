@@ -2,6 +2,7 @@
 
 {#-
     Configures a certificate authority:
+
     * creates a root certificate or a CSR, if not ``ca:self_signed``
     * if not ``ca:self_signed``, saves the configured root certificate
     * publishes the root certificate to the mine

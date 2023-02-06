@@ -13,10 +13,17 @@ pca:
     keysize: 4096
       # CN of the CA certificate
     name: ''
-      # Whether to generate a self-signed certificate
+      # Whether to generate a self-signed certificate.
+      # If not self signed, this formula will generate a CSR instead
+      # that you will need to sign with the parent CA.
+      # You will need to write the resulting signed certificate manually
+      # to `<lookup:pki_dir>/<lookup:ca_name>/salt_ca_root.crt`,
+      # by default `/etc/pki/salt_ca/salt_ca_root.crt`
     self_signed: true
       # How many days the self-signed certificate should be valid for
     self_signed_valid: 3655
+      # If not self signed, pass the root CA certificate to trust
+    root_crt: ''
 
     # This formula assumes the new, `x509_v2` modules.
     # Additional functionality can be enabled by upgrading the

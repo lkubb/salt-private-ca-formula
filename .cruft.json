@@ -42,7 +42,8 @@
           "extra_info": {},
           "name": "",
           "self_signed": true,
-          "self_signed_valid": 3655
+          "self_signed_valid": 3655,
+          "root_crt": ""
         },
         "upgrade_cryptography": false
       },
