@@ -38,7 +38,7 @@ Upgrade cryptography for pca formula:
 Ensure PKI dir exists with correct perms:
   file.directory:
     - name: {{ pca.lookup.pki_dir }}
-    - mode: '0644'
+    - mode: '0755'
     - user: root
     - group: {{ pca.lookup.rootgroup }}
     - makedirs: true
@@ -46,7 +46,7 @@ Ensure PKI dir exists with correct perms:
 Ensure CA dir exists with correct perms:
   file.directory:
     - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name) }}
-    - mode: '0600'
+    - mode: '0700'
     - user: root
     - group: {{ pca.lookup.rootgroup }}
     - require:

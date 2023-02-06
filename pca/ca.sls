@@ -19,7 +19,7 @@ include:
 Ensure CA certs dir exists with correct perms:
   file.directory:
     - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "issued_certs") }}
-    - mode: '0600'
+    - mode: '0700'
     - user: root
     - group: {{ pca.lookup.rootgroup }}
     - require:
