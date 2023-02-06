@@ -16,6 +16,9 @@ Private CA Formula
 
 Manage a private Certificate Authority with Salt.
 
+Note that this formula contains rewritten ``x509`` modules which will become
+available in Salt v3006 by default. See `#63099 <https://github.com/saltstack/salt/pull/63099>`_.
+
 .. contents:: **Table of Contents**
    :depth: 1
 
