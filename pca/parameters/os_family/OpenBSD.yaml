@@ -16,6 +16,4 @@ values:
     pkg_manager: pkg
     rootgroup: wheel
     ca_bundle_file: /etc/ssl/cert.pem
-    pkg:
-      name: py-M2Crypto--python3
 ...

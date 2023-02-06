@@ -6,32 +6,46 @@
 
 {%- set ca_root = salt["mine.get"](pca.ca.minion_id, "salt_ca_root").get(pca.ca.minion_id, false) %}
 
-Install prerequisites for x509 module:
-  pkg.installed:
-    - name: {{ pca.lookup.pkg.name }}
-    - reload_modules: True
-
 {%- if pca.upgrade_cryptography %}
+{%-   set onedir = grains["pythonexecutable"].endswith("/run") %}
 
-Install pip for pca:
+{%-   if not onedir %}
+
+Ensure pip is installed for pca formula:
   pkg.installed:
     - name: {{ pca.lookup.pip.pkg }}
     - reload_modules: True
+{%-   endif %}
 
-Upgrade cryptography for pca:
+# Salt ships with cryptography by default, but its version
+# is usually outdated.
+Upgrade cryptography for pca formula:
   pip.installed:
     - name: {{ pca.lookup.pip.cryptography }}
     - upgrade: true
     - reload_modules: True
+{%-   if not onedir %}
+    - require:
+      - pkg: {{ pca.lookup.pip.pkg }}
+{%-   endif %}
 {%- endif %}
 
 Ensure PKI dir exists with correct perms:
   file.directory:
     - name: {{ pca.lookup.pki_dir }}
-    - mode: '0600'
+    - mode: '0644'
     - user: root
     - group: {{ pca.lookup.rootgroup }}
     - makedirs: true
+
+Ensure CA dir exists with correct perms:
+  file.directory:
+    - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name) }}
+    - mode: '0600'
+    - user: root
+    - group: {{ pca.lookup.rootgroup }}
+    - require:
+      - file: {{ pca.lookup.pki_dir }}
 
 {%- if ca_root %}
 

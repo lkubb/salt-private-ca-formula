@@ -18,7 +18,7 @@
       "name": "Private CA",
       "abbr": "pca",
       "abbr_pysafe": "pca",
-      "pkg": "python-cryptography",
+      "pkg": "python3-cryptography",
       "needs_repo": "",
       "config": "",
       "service": "",
@@ -27,10 +27,11 @@
       "git_username": "lkubb",
       "_lookup": {
         "pki_dir": "/etc/pki",
+        "ca_name": "salt_ca",
         "ca_bundle_path": "/etc/pki/ca-trust/source/anchors",
         "ca_bundle_update_cmd": "update-ca-trust",
         "pip": {
-          "pkg": "python-pip",
+          "pkg": "python3-pip",
           "cryptography": "cryptography"
         }
       },

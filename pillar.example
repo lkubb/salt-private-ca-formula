@@ -16,9 +16,10 @@ pca:
   lookup:
     ca_bundle_path: /etc/pki/ca-trust/source/anchors
     ca_bundle_update_cmd: update-ca-trust
+    ca_name: salt_ca
     pip:
       cryptography: cryptography
-      pkg: python-pip
+      pkg: python3-pip
     pki_dir: /etc/pki
 
   tofs:

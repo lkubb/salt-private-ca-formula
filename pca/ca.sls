@@ -11,7 +11,7 @@ include:
 
 Ensure CA certs dir exists with correct perms:
   file.directory:
-    - name: {{ pca.lookup.pki_dir | path_join("issued_certs") }}
+    - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "issued_certs") }}
     - mode: '0600'
     - user: root
     - group: {{ pca.lookup.rootgroup }}
@@ -20,7 +20,7 @@ Ensure CA certs dir exists with correct perms:
 
 Manage CA singing key:
   x509.private_key_managed:
-    - name: {{ pca.lookup.pki_dir | path_join("salt_ca.key") }}
+    - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.key") }}
     - algo: {{ pca.ca.key_algo }}
     - keysize: {{ pca.ca.keysize if pca.ca.key_algo in ["rsa", "ec"] else "null" }}
     - user: root
@@ -33,8 +33,8 @@ Manage CA singing key:
 
 Manage self-signed root CA cert:
   x509.certificate_managed:
-    - name: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
-    - signing_private_key: {{ pca.lookup.pki_dir | path_join("salt_ca.key") }}
+    - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.crt") }}
+    - signing_private_key: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.key") }}
     - CN: {{ pca.ca.name or grains["id"] }}
     - basicConstraints: "critical, CA:true"
     - keyUsage: "critical, cRLSign, keyCertSign"
@@ -49,16 +49,16 @@ Manage self-signed root CA cert:
       - Manage CA singing key
   # ensure the minions can access it as salt_ca_root
   file.symlink:
-    - name: {{ pca.lookup.pki_dir | path_join("salt_ca_root.crt") }}
-    - target: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
+    - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca_root.crt") }}
+    - target: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.crt") }}
     - require:
-      - x509: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
+      - x509: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.crt") }}
 {%- else %}
 
 Manage certificate signing request for intermediate CA:
   x509.csr_managed:
-    - name: {{ pca.lookup.pki_dir | path_join("salt_ca.csr") }}
-    - private_key: {{ pca.lookup.pki_dir | path_join("salt_ca.key") }}
+    - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.csr") }}
+    - private_key: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.key") }}
     - CN: {{ pca.ca.name or grains["id"] }}
     - basicConstraints: "critical, CA:true"
     - keyUsage: "critical, cRLSign, keyCertSign"
@@ -72,7 +72,7 @@ Manage certificate signing request for intermediate CA:
 CA root cert is managed:
   # this does not need to ensure trust, only keep track of the root cert
   x509.pem_managed:
-    - name: {{ pca.lookup.pki_dir | path_join("salt_ca_root.crt") }}
+    - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca_root.crt") }}
     - text: {{ pca.ca.root_crt | json }}
     - makedirs: True
     - mode: '0644'
@@ -88,9 +88,9 @@ Publish CA root certificate to the mine:
     - mine.send:
       - name: salt_ca_root
       - mine_function: x509.get_pem_entry
-      - text: {{ pca.lookup.pki_dir | path_join("salt_ca_root.crt") }}
+      - text: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca_root.crt") }}
     - onchanges:
-      - x509: {{ pca.lookup.pki_dir | path_join("salt_ca.crt" if pca.ca.self_signed else "salt_ca_root.crt") }}
+      - x509: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.crt" if pca.ca.self_signed else "salt_ca_root.crt") }}
 
 {%- if not pca.ca.self_signed %}
 
@@ -99,7 +99,7 @@ Publish CA intermediate certificate to the mine:
     - mine.send:
       - name: salt_ca_intermediate
       - mine_function: x509.get_pem_entry
-      - text: {{ pca.lookup.pki_dir | path_join("salt_ca.crt") }}
+      - text: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca.crt") }}
 {%- endif %}
 # This intentionally does not manage minion config
 # (x509_signing_policies/mine_functions)
