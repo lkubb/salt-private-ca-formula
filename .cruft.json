@@ -1,6 +1,6 @@
 {
   "template": "https://github.com/lkubb/salt-template-formula",
-  "commit": "d6b11ef9adae324530ccf9a8dac7600dc1670e1d",
+  "commit": "480ee76119cf46d599a1ef29b9e0472958c827c6",
   "checkout": null,
   "context": {
     "cookiecutter": {
@@ -25,7 +25,7 @@
       "subcomponent": "",
       "subcomponent_config": "",
       "git_username": "lkubb",
-      "_lookup": {
+      "lookup": {
         "pki_dir": "/etc/pki",
         "ca_name": "salt_ca",
         "ca_bundle_path": "/etc/pki/ca-trust/source/anchors",
@@ -35,7 +35,7 @@
           "cryptography": "cryptography"
         }
       },
-      "_settings": {
+      "settings": {
         "ca": {
           "key_algo": "rsa",
           "keysize": 4096,
