@@ -29,11 +29,7 @@
         "pki_dir": "/etc/pki",
         "ca_name": "salt_ca",
         "ca_bundle_path": "/etc/pki/ca-trust/source/anchors",
-        "ca_bundle_update_cmd": "update-ca-trust",
-        "pip": {
-          "pkg": "python3-pip",
-          "cryptography": "cryptography"
-        }
+        "ca_bundle_update_cmd": "update-ca-trust"
       },
       "settings": {
         "ca": {
@@ -44,8 +40,7 @@
           "self_signed": true,
           "self_signed_valid": 3655,
           "root_crt": ""
-        },
-        "upgrade_cryptography": false
+        }
       },
       "_template": "https://github.com/lkubb/salt-template-formula"
     }

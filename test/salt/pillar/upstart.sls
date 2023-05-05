@@ -11,9 +11,6 @@ pca:
     ca_bundle_path: /etc/pki/ca-trust/source/anchors
     ca_bundle_update_cmd: update-ca-trust
     ca_name: salt_ca
-    pip:
-      cryptography: cryptography
-      pkg: python3-pip
     pki_dir: /etc/pki
   ca:
     extra_info: {}
@@ -23,7 +20,6 @@ pca:
     root_crt: ''
     self_signed: true
     self_signed_valid: 3655
-  upgrade_cryptography: false
 
   tofs:
     # The files_switch key serves as a selector for alternative

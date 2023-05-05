@@ -83,7 +83,6 @@ includes `pca.ca`_ as well.
 ^^^^^^^^^^^^
 Ensures an existing Salt CA is trusted.
 Pulls the root certificate to trust from the mine.
-Also upgrades ``cryptography``, if configured.
 
 
 ``pca.ca``

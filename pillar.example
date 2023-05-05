@@ -13,6 +13,8 @@ pca:
     keysize: 4096
       # CN of the CA certificate
     name: ''
+      # If not self signed, pass the root CA certificate to trust
+    root_crt: ''
       # Whether to generate a self-signed certificate.
       # If not self signed, this formula will generate a CSR instead
       # that you will need to sign with the parent CA.
@@ -22,13 +24,6 @@ pca:
     self_signed: true
       # How many days the self-signed certificate should be valid for
     self_signed_valid: 3655
-      # If not self signed, pass the root CA certificate to trust
-    root_crt: ''
-
-    # This formula assumes the new, `x509_v2` modules.
-    # Additional functionality can be enabled by upgrading the
-    # cryptography library. Enable automatic updates for it:
-  upgrade_cryptography: false
 
   lookup:
     ca_bundle_path: /etc/pki/ca-trust/source/anchors
