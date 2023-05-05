@@ -21,6 +21,10 @@ includes `pca.ca`_ as well.
 Ensures an existing Salt CA is trusted.
 Pulls the root certificate to trust from the mine.
 
+Should work for Linux/BSD and MacOS. For the latter,
+this requires the `macprofile module <https://github.com/lkubb/salt-tool-macos-formula>`_,
+which will install the necessary profile interactively.
+
 
 ``pca.ca``
 ^^^^^^^^^^
