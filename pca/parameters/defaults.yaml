@@ -19,6 +19,11 @@ values:
     root_crt: ''
     self_signed: true
     self_signed_valid: 3655
+  tofs:
+    files_switch:
+      - id
+      - roles
+      - os_family
   # Just here for testing
   added_in_defaults: defaults_value
   winner: defaults
