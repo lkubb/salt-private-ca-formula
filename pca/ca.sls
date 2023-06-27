@@ -81,7 +81,7 @@ CA root cert is managed:
   x509.pem_managed:
     - name: {{ pca.lookup.pki_dir | path_join(pca.lookup.ca_name, "salt_ca_root.crt") }}
     - text: {{ pca.ca.root_crt | json }}
-    - makedirs: True
+    - makedirs: true
     - mode: '0644'
     - dir_mode: '0755'
     - user: root

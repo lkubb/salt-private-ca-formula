@@ -185,7 +185,7 @@ def create_certificate(
     pkcs12_encryption_compat=False,
     pkcs12_friendlyname=None,
     path=None,
-    overwrite=True,
+    overwrite=False,
     raw=False,
     **kwargs,
 ):
@@ -614,7 +614,7 @@ def _create_certificate_local(
             path=os.path.join(copypath, f"{prepend}{cert.serial_number:x}.crt"),
             pem_type="CERTIFICATE",
         )
-    return builder.sign(signing_private_key, algorithm=algorithm), private_key_loaded
+    return cert, private_key_loaded
 
 
 def encode_certificate(
@@ -1196,7 +1196,7 @@ def create_private_key(
     keysize
         For ``rsa``, specifies the bitlength of the private key (2048, 3072, 4096).
         For ``ec``, specifies the NIST curve to use (256, 384, 521).
-        Irrelevant for Edwards-curve schemes (`ed25519``, ``ed448``).
+        Irrelevant for Edwards-curve schemes (``ed25519``, ``ed448``).
         Defaults to 2048 for RSA and 256 for EC.
 
     passphrase
@@ -1555,7 +1555,7 @@ def get_public_key(key, passphrase=None, asObj=None):
     except SaltInvocationError:
         pass
     raise CommandExecutionError(
-        "Could not load key as certificate, public key, private key, CSR or CRL"
+        "Could not load key as certificate, public key, private key or CSR"
     )
 
 
@@ -1942,7 +1942,7 @@ def verify_private_key(private_key, public_key, passphrase=None):
     passphrase
         If ``private_key`` is encrypted, the passphrase to decrypt it.
     """
-    privkey = x509util.load_privkey(private_key, passphrase=None)
+    privkey = x509util.load_privkey(private_key, passphrase=passphrase)
     pubkey = x509util.load_pubkey(get_public_key(public_key))
     return x509util.is_pair(pubkey, privkey)
 
@@ -1971,7 +1971,6 @@ def verify_signature(
         certificate.
 
     signing_pub_key_passphrase
-
         If ``signing_pub_key`` is encrypted, the passphrase to decrypt it.
     """
     cert = x509util.load_cert(certificate)
