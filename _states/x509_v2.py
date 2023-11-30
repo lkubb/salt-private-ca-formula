@@ -207,7 +207,10 @@ __virtualname__ = "x509"
 
 
 def __virtual__():
-    if not HAS_CRYPTOGRAPHY:
+    if not HAS_CRYPTOGRAPHY and "running_data" not in __opts__["cachedir"]:
+        # custom utils are not synced via salt-ssh, hence the import above
+        # will fail. This means until the upstream utils module is updated,
+        # this can only work via the certificate_managed_wrapper.
         return (False, "Could not load cryptography")
     if not features.get("x509_v2"):
         return (

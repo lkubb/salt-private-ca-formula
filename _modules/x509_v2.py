@@ -145,7 +145,7 @@ try:
     import cryptography.x509 as cx509
     from cryptography.hazmat.primitives import hashes, serialization
 
-    import x509util
+    import salt.utils.x509 as x509util
 
     HAS_CRYPTOGRAPHY = True
 except ImportError:
