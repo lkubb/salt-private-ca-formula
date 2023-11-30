@@ -2,7 +2,9 @@
 Manage X.509 certificates
 =========================
 
-Configuration instructions and general remarks are documented
+.. versionadded:: 3007.0
+
+General configuration instructions and general remarks are documented
 in the :ref:`execution module docs <x509-setup>`.
 
 Configuration
@@ -25,11 +27,14 @@ merged opts after).
     ssh_minion_opts:
       features:
         x509_v2: true
+
+.. note::
+
+    Compound matching allowed callers is **not supported** with salt-ssh
+    minions. They will always be denied.
 """
-import base64
 import copy
 import logging
-import time
 from pathlib import Path
 
 try:
@@ -367,7 +372,7 @@ def create_certificate(
     # Deprecation checks vs the old x509 module
     if "algorithm" in kwargs:
         salt.utils.versions.warn_until(
-            "Potassium",
+            3009,
             "`algorithm` has been renamed to `digest`. Please update your code.",
         )
         kwargs["digest"] = kwargs.pop("algorithm")
@@ -382,7 +387,7 @@ def create_certificate(
     if "days_valid" not in kwargs and "not_after" not in kwargs:
         try:
             salt.utils.versions.warn_until(
-                "Potassium",
+                3009,
                 "The default value for `days_valid` will change to 30. Please adapt your code accordingly.",
             )
             kwargs["days_valid"] = 365
@@ -470,10 +475,11 @@ def create_certificate(
 
 
 def _query_remote(ca_server, signing_policy, kwargs, get_signing_policy_only=False):
-    result = publish(
+    result = __salt__["publish.publish"](
         ca_server,
         "x509.sign_remote_certificate",
         arg=[signing_policy, kwargs, get_signing_policy_only],
+        regular_minions=True,
     )
 
     if not result:
@@ -518,8 +524,8 @@ def _create_certificate_remote(
             pass
         else:
             if _check_ret(__salt__["file.file_exists"](kwargs["csr"])):
-                kwargs["csr"] = base64.b64decode(
-                    _check_ret(__salt__["hashutil.base64_encodefile"](kwargs["csr"]))
+                kwargs["csr"] = _check_ret(
+                    __salt__["hashutil.base64_encodefile"](kwargs["csr"])
                 )
 
     result = _query_remote(ca_server, signing_policy, kwargs)
@@ -575,7 +581,7 @@ def get_signing_policy(signing_policy, ca_server=None):
         for long_name in long_names:
             if long_name in policy:
                 salt.utils.versions.warn_until(
-                    "Potassium",
+                    3009,
                     f"Found {long_name} in {signing_policy}. Please migrate to the short name: {name}",
                 )
                 policy[name] = policy.pop(long_name)
@@ -585,7 +591,7 @@ def get_signing_policy(signing_policy, ca_server=None):
         for long_name in long_names:
             if long_name in policy:
                 salt.utils.versions.warn_until(
-                    "Potassium",
+                    3009,
                     f"Found {long_name} in {signing_policy}. Please migrate to the short name: {extname}",
                 )
                 policy[extname] = policy.pop(long_name)
@@ -613,165 +619,386 @@ def _check_ret(ret):
     return ret
 
 
-# The publish wrapper currently only publishes to SSH minions
-# TODO: Add this to the wrapper - ssh_minions=[bool] and regular_minions=[bool]
-def _publish(
-    tgt,
-    fun,
-    arg=None,
-    tgt_type="glob",
-    returner="",
-    timeout=5,
-    form="clean",
-    wait=False,
-    via_master=None,
+def certificate_managed_wrapper(
+    name,
+    ca_server,
+    signing_policy,
+    private_key_managed=None,
+    private_key=None,
+    private_key_passphrase=None,
+    csr=None,
+    public_key=None,
+    certificate_managed=None,
 ):
-    masterapi = salt.daemons.masterapi.RemoteFuncs(__opts__["__master_opts__"])
+    """
+    This function essentially behaves like a sophisticated Jinja macro.
+    It is intended to provide a replacement for the ``x509.certificate_managed``
+    state with peer publishing, which does not work via salt-ssh.
+    It performs necessary checks during rendering and returns an appropriate
+    highstate structure that does work via salt-ssh (if a certificate needs to be
+    reissued, it is done during rendering and the actual state just manages the file).
 
-    log.info("Publishing '%s'", fun)
-    load = {
-        "cmd": "minion_pub",
-        "fun": fun,
-        "arg": arg,
-        "tgt": tgt,
-        "tgt_type": tgt_type,
-        "ret": returner,
-        "tmo": timeout,
-        "form": form,
-        "id": __opts__["id"],
-        "no_parse": __opts__.get("no_parse", []),
+    Required arguments are ``name``, ``ca_server`` and ``signing_policy``.
+    If you want this function to manage a private key, it should be specified
+    in ``private_key_managed``, which should contain all arguments to the
+    respective state. Note that the private key will not be checked for changes.
+    If you want to use a CSR or a public key as a source,
+    it must exist during state rendering and you cannot manage a private key.
+
+    All optional keyword arguments to ``certificate_managed`` can be specified
+    in the dict param ``certificate_managed``.
+    Key rotation can be activated by including ``new: true`` in the dict for
+    ``private_key_managed``.
+
+    As an example, for Jinja templates, you can serialize this function's output
+    directly into the state file:
+
+    .. code-block:: jinja
+
+        {%- set private_key_params = {
+                "name": "/opt/app/certs/app.key",
+                "algo": "ed25519",
+                "new": true
+        } %}
+        {%- set certificate_params = {
+                "basicConstraints": "critical, CA:false",
+                "subjectKeyIdentifier": "hash",
+                "authorityKeyIdentifier": "keyid:always",
+                "subjectAlternativeNamems": ["DNS:my.minion.example.com"],
+                "CN": "my.minion.example.com",
+                "days_remaining": 7,
+                "days_valid": 30
+        } %}
+        {{
+            salt["x509.certificate_managed_wrapper"](
+                "/opt/app/certs/app.crt",
+                ca_server="ca_minion",
+                signing_policy="www",
+                private_key_managed=private_key_params,
+                certificate_managed=certificate_params
+            ) | yaml(false)
+        }}
+
+
+    name
+        The path of the certificate to manage.
+
+    ca_server
+        The CA server to contact. This is required since this function
+        is not necessary for locally signed certificates.
+
+    signing_policy
+        The name of the signing policy to use. Required since remotely
+        signing a certificate requires a policy.
+
+    private_key_managed
+        A dictionary of keyword arguments to ``x509.private_key_managed``.
+        This is required if ``private_key``, ``csr`` or ``public_key``
+        have not been specified.
+        Key rotation will be performed automatically if ``new: true``.
+
+    private_key
+        The path of a private key to use for public key derivation
+        (it will not be managed).
+        Does not accept the key itself. Mutually exclusive with ``private_key_managed``,
+        ``csr`` and ``public_key``.
+
+    private_key_passphrase
+        If the specified private key needs a passphrase, specify it here.
+
+    csr
+        The path of a CSR to use for public key derivation.
+        Does not accept the CSR itself. Mutually exclusive with ``private_key_managed``,
+        ``private_key`` and ``public_key``.
+
+    public_key
+        The path of a public key to use.
+        Does not accept the CSR itself. Mutually exclusive with ``private_key_managed``,
+        ``private_key`` and ``public_key``.
+
+    certificate_managed
+        A dictionary of keyword arguments to ``x509.certificate_managed``.
+
+    .. note::
+
+        This function does not claim feature parity, but it uses the same
+        change check as the regular state module. Special handling for symlinks
+        and other edge cases is not implemented.
+
+        There will be one or two resulting states, depending on the presence of
+        ``private_key_managed``. Both states will have the managed file path as
+        their state ID (suffixed with either _key or _crt), the state module
+        will always be ``x509``.
+
+        Private keys will not leave the remote machine, unless you're managing
+        PKCS12 certificates.
+    """
+    if not (private_key_managed or private_key or csr or public_key):
+        raise SaltInvocationError(
+            "Need to specify either private_key_managed, private_key, csr or public_key"
+        )
+
+    create_private_key = False
+    recreate_private_key = False
+    new_certificate = False
+    reencode_certificate = False
+    certificate_managed = certificate_managed or {}
+    private_key_managed = private_key_managed or {}
+    public_key = None
+    cm_defaults = {
+        "days_remaining": 7,
+        "days_valid": 30,
+        "not_before": None,
+        "not_after": None,
+        "encoding": "pem",
+        "append_certs": [],
+        "digest": "sha256",
     }
-    peer_data = masterapi.minion_pub(load)
-    if not peer_data:
-        return {}
-    # CLI args are passed as strings, re-cast to keep time.sleep happy
-    if wait:
-        loop_interval = 0.3
-        matched_minions = set(peer_data["minions"])
-        returned_minions = set()
-        loop_counter = 0
-        while returned_minions ^ matched_minions:
-            load = {
-                "cmd": "pub_ret",
-                "id": __opts__["id"],
-                "jid": peer_data["jid"],
-            }
-            ret = masterapi.pub_ret(load)
-            returned_minions = set(ret.keys())
+    for param, val in cm_defaults.items():
+        certificate_managed.setdefault(param, val)
 
-            end_loop = False
-            if returned_minions >= matched_minions:
-                end_loop = True
-            elif (loop_interval * loop_counter) > timeout:
-                if not returned_minions:
-                    return {}
-                end_loop = True
+    cert_file_args, cert_args = x509util.split_file_kwargs(certificate_managed)
+    pk_file_args, pk_args = x509util.split_file_kwargs(private_key_managed)
+    ret = {}
+    current = None
+    cert_changes = {}
+    pk_temp_file = None
 
-            if end_loop:
-                if form == "clean":
-                    cret = {}
-                    for host in ret:
-                        cret[host] = ret[host]["ret"]
-                    return cret
-                else:
-                    return ret
-            loop_counter = loop_counter + 1
-            time.sleep(loop_interval)
-    else:
-        time.sleep(float(timeout))
-        load = {
-            "cmd": "pub_ret",
-            "id": __opts__["id"],
-            "jid": peer_data["jid"],
-        }
-        ret = masterapi.pub_ret(load)
-        if form == "clean":
-            cret = {}
-            for host in ret:
-                cret[host] = ret[host]["ret"]
-            return cret
+    try:
+        # Check if we have a source for a public key
+        if pk_args:
+            private_key = pk_args["name"]
+            if not _check_ret(__salt__["file.file_exists"](private_key)):
+                create_private_key = True
+            else:
+                public_key = _check_ret(
+                    __salt__["x509.get_public_key"](
+                        pk_args["name"],
+                        pk_args.get("passphrase"),
+                    )
+                )
+        elif private_key:
+            if not _check_ret(__salt__["file.file_exists"](private_key)):
+                raise SaltInvocationError("Specified private key does not exist")
+            public_key = _check_ret(
+                __salt__["x509.get_public_key"](private_key, private_key_passphrase)
+            )
+        elif public_key:
+            # todo usually can be specified as the key itself
+            if not _check_ret(__salt__["file.file_exists"](public_key)):
+                raise SaltInvocationError("Specified public key does not exist")
+            public_key = _check_ret(__salt__["x509.get_public_key"](public_key))
+        elif csr:
+            # todo usually can be specified as the csr itself
+            if not _check_ret(__salt__["file.file_exists"](csr)):
+                raise SaltInvocationError("Specified csr does not exist")
+            csr = _check_ret(__salt__["hashutil.base64_encodefile"](csr))
+
+        if create_private_key:
+            # A missing private key means we need to create a certificate regardless
+            new_certificate = True
+        elif not _check_ret(__salt__["file.file_exists"](name)):
+            new_certificate = True
         else:
+            # We check the certificate the same way the state does
+            crt = _check_ret(__salt__["hashutil.base64_encodefile"](name))
+            signing_policy_contents = get_signing_policy(
+                signing_policy, ca_server=ca_server
+            )
+            if "encoding" not in cert_args:
+                raise ValueError(cert_args)
+            current, cert_changes, replace, _ = x509util.check_cert_changes(
+                crt,
+                **cert_args,
+                ca_server=ca_server,
+                signing_policy_contents=signing_policy_contents,
+                public_key=public_key,
+                csr=csr,
+            )
+            new_certificate = new_certificate or replace
+            reencode_certificate = bool(cert_changes) and not bool(
+                set(cert_changes)
+                - {
+                    "additional_certs",
+                    "encoding",
+                    "pkcs12_friendlyname",
+                }
+            )
+
+        if pk_args and pk_args.get("new") and not create_private_key:
+            if new_certificate or (cert_changes and not reencode_certificate):
+                recreate_private_key = True
+
+        if __opts__["test"]:
+            if pk_args:
+                pk_ret = {
+                    "name": pk_args["name"],
+                    "result": True,
+                    "comment": "The private key is in the correct state",
+                    "changes": {},
+                    "require_in": [
+                        name + "_crt",
+                    ],
+                }
+                if create_private_key or recreate_private_key:
+                    pp = "created" if not recreate_private_key else "recreated"
+                    pk_ret["changes"][pp] = name
+                    pk_ret["comment"] = f"The private key would have been {pp}"
+                ret[pk_args["name"] + "_key"] = {
+                    "x509.private_key_managed_ssh": [{k: v} for k, v in pk_ret.items()]
+                }
+                ret[pk_args["name"] + "_key"]["x509.private_key_managed_ssh"].extend(
+                    {k: v} for k, v in pk_file_args.items()
+                )
+
+            cert_ret = {
+                "name": name,
+                "result": True,
+                "changes": {},
+            }
+            if new_certificate:
+                pp = ("re" if current else "") + "created"
+                cert_ret["comment"] = f"The certificate would have been {pp}"
+                cert_ret["changes"][pp] = name
+            elif reencode_certificate:
+                cert_ret["comment"] = "The certificate would have been reencoded"
+                cert_ret["changes"] = cert_changes
+            elif cert_changes:
+                cert_ret["comment"] = "The certificate would have been updated"
+                cert_ret["changes"] = cert_changes
+            else:
+                cert_ret["comment"] = "The certificate is in the correct state"
+                cert_ret["changes"] = {}
+
+            ret[name + "_crt"] = {
+                "x509.certificate_managed_ssh": [{k: v} for k, v in cert_ret.items()]
+            }
+            ret[name + "_crt"]["x509.certificate_managed_ssh"].extend(
+                {k: v} for k, v in cert_file_args.items()
+            )
             return ret
+
+        if create_private_key or recreate_private_key:
+            pk_temp_file = _check_ret(__salt__["temp.file"]())
+            _check_ret(__salt__["file.set_mode"](pk_temp_file, "0600"))
+            cpk_args = {"path": pk_temp_file}
+            for arg in (
+                "algo",
+                "keysize",
+                "passphrase",
+                "encoding",
+                "pkcs12_encryption_compat",
+            ):
+                if arg in pk_args:
+                    cpk_args[arg] = pk_args[arg]
+            _check_ret(__salt__["x509.create_private_key"](**cpk_args))
+            public_key = _check_ret(
+                __salt__["x509.get_public_key"](pk_temp_file, pk_args.get("passphrase"))
+            )
+        if pk_args:
+            pk_ret = {
+                "name": pk_args["name"],
+                "result": True,
+                "comment": "The private key is in the correct state",
+                "changes": {},
+                "require_in": [
+                    name + "_crt",
+                ],
+            }
+            if create_private_key or recreate_private_key:
+                pp = "created" if not recreate_private_key else "recreated"
+                pk_ret["changes"][pp] = pk_args["name"]
+                pk_ret["comment"] = f"The private key has been {pp}"
+            ret[pk_args["name"] + "_key"] = {
+                "x509.private_key_managed_ssh": [{k: v} for k, v in pk_ret.items()]
+            }
+            ret[pk_args["name"] + "_key"]["x509.private_key_managed_ssh"].extend(
+                {k: v} for k, v in pk_file_args.items()
+            )
+            ret[pk_args["name"] + "_key"]["x509.private_key_managed_ssh"].append(
+                {"tempfile": pk_temp_file}
+            )
+
+        cert_ret = {
+            "name": name,
+            "result": True,
+            "changes": {},
+            "encoding": certificate_managed["encoding"],
+        }
+        if reencode_certificate:
+            cert_ret["contents"] = _check_ret(
+                __salt__["x509.encode_certificate"](
+                    x509util.to_pem(current),
+                    encoding=certificate_managed["encoding"],
+                    append_certs=certificate_managed["append_certs"],
+                    private_key=pk_args["name"] if pk_args else private_key,
+                    private_key_passphrase=pk_args.get("passphrase")
+                    if pk_args
+                    else private_key,
+                    pkcs12_passphrase=certificate_managed.get("pkcs12_passphrase"),
+                    pkcs12_encryption_compat=certificate_managed.get(
+                        "pkcs12_encryption_compat"
+                    ),
+                    pkcs12_friendlyname=certificate_managed.get("pkcs12_friendlyname"),
+                    raw=False,
+                )
+            )
+            cert_ret["comment"] = "The certificate has been reencoded"
+            cert_ret["changes"] = cert_changes
+        elif new_certificate or cert_changes:
+            pp = ("re" if current else "") + "created"
+            cert_ret["contents"] = create_certificate(
+                **_filter_cert_managed_state_args(cert_args),
+                ca_server=ca_server,
+                signing_policy=signing_policy,
+                csr=csr,
+                public_key=public_key,
+            )
+            cert_ret["comment"] = f"The certificate has been {pp}"
+            if not cert_changes:
+                cert_ret["changes"][pp] = name
+            else:
+                cert_ret["changes"] = cert_changes
+        else:
+            cert_ret["comment"] = "The certificate is in the correct state"
+            cert_ret["changes"] = {}
+
+        ret[name + "_crt"] = {
+            "x509.certificate_managed_ssh": [{k: v} for k, v in cert_ret.items()]
+        }
+        ret[name + "_crt"]["x509.certificate_managed_ssh"].append(
+            {k: v} for k, v in cert_file_args.items()
+        )
+    except (CommandExecutionError, SaltInvocationError) as err:
+        if pk_temp_file:
+            if _check_ret(__salt__["file.file_exists"](pk_temp_file)):
+                try:
+                    # otherwise, get rid of it
+                    _check_ret(__salt__["file.remove"](pk_temp_file))
+                except Exception as err:  # pylint: disable=broad-except
+                    log.error(str(err), exc_info_on_loglevel=logging.DEBUG)
+        ret = {
+            name
+            + "_crt": {
+                "x509.certificate_managed_ssh": [
+                    {"name": name},
+                    {"result": False},
+                    {"comment": str(err)},
+                    {"changes": {}},
+                ]
+            }
+        }
+        if pk_args and "name" in pk_args:
+            ret[pk_args["name"] + "_key"] = {
+                "x509.private_key_managed_ssh": [
+                    {"name": pk_args["name"]},
+                    {"result": False},
+                    {"comment": str(err)},
+                    {"changes": {}},
+                ]
+            }
     return ret
 
 
-def publish(
-    tgt, fun, arg=None, tgt_type="glob", returner="", timeout=5, via_master=None
-):
-    """
-    Publish a command from the minion out to other minions.
-
-    Publications need to be enabled on the Salt master and the minion
-    needs to have permission to publish the command. The Salt master
-    will also prevent a recursive publication loop, this means that a
-    minion cannot command another minion to command another minion as
-    that would create an infinite command loop.
-
-    The ``tgt_type`` argument is used to pass a target other than a glob into
-    the execution, the available options are:
-
-    - glob
-    - pcre
-    - grain
-    - grain_pcre
-    - pillar
-    - pillar_pcre
-    - ipcidr
-    - range
-    - compound
-
-    .. versionchanged:: 2017.7.0
-        The ``expr_form`` argument has been renamed to ``tgt_type``, earlier
-        releases must use ``expr_form``.
-
-    Note that for pillar matches must be exact, both in the pillar matcher
-    and the compound matcher. No globbing is supported.
-
-    The arguments sent to the minion publish function are separated with
-    commas. This means that for a minion executing a command with multiple
-    args it will look like this:
-
-    .. code-block:: bash
-
-        salt system.example.com publish.publish '*' user.add 'foo,1020,1020'
-        salt system.example.com publish.publish 'os:Fedora' network.interfaces '' grain
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt system.example.com publish.publish '*' cmd.run 'ls -la /tmp'
-
-
-    .. admonition:: Attention
-
-        If you need to pass a value to a function argument and that value
-        contains an equal sign, you **must** include the argument name.
-        For example:
-
-        .. code-block:: bash
-
-            salt '*' publish.publish test.kwarg arg='cheese=spam'
-
-        Multiple keyword arguments should be passed as a list.
-
-        .. code-block:: bash
-
-            salt '*' publish.publish test.kwarg arg="['cheese=spam','spam=cheese']"
-
-
-    When running via salt-call, the `via_master` flag may be set to specific which
-    master the publication should be sent to. Only one master may be specified. If
-    unset, the publication will be sent only to the first master in minion configuration.
-    """
-    return _publish(
-        tgt,
-        fun,
-        arg=arg,
-        tgt_type=tgt_type,
-        returner=returner,
-        timeout=timeout,
-        form="clean",
-        wait=True,
-        via_master=via_master,
-    )
+def _filter_cert_managed_state_args(kwargs):
+    return {k: v for k, v in kwargs.items() if k != "days_remaining"}
