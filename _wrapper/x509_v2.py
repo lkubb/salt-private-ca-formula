@@ -629,7 +629,7 @@ def certificate_managed_wrapper(
     csr=None,
     public_key=None,
     certificate_managed=None,
-    test=False,
+    test=None,
 ):
     """
     This function essentially behaves like a sophisticated Jinja macro.
@@ -723,8 +723,11 @@ def certificate_managed_wrapper(
         A dictionary of keyword arguments to ``x509.certificate_managed``.
 
     test
-        Run in test mode. This needs to be passed explicitly because the value
-        is not loaded into wrapper modules. Pass it like ``test=opts.get("test")``.
+        Run in test mode. This should be passed explicitly because the value
+        is not loaded into wrapper modules (reliably?). Pass it like
+        ``test=opts.get("test")``.
+        If this is forgotten, the files on the remote will still not be updated,
+        but a certificate might be issued unnecessarily.
 
     .. note::
 
@@ -836,7 +839,7 @@ def certificate_managed_wrapper(
             if new_certificate or (cert_changes and not reencode_certificate):
                 recreate_private_key = True
 
-        if test:
+        if test or __opts__.get("test"):
             if pk_args:
                 pk_ret = {
                     "name": pk_args["name"],

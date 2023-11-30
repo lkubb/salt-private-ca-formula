@@ -1493,7 +1493,13 @@ def certificate_managed_ssh(
     _add_sub_state_run(ret, file_managed_ret)
     if not _check_file_ret(file_managed_ret, ret, __salt__["file.file_exists"](name)):
         return ret
-    if contents is not None and not __opts__["test"]:
+    if contents is not None:
+        if __opts__["test"]:
+            ret["comment"] += (
+                '. The file was not actually updated - please pass test=opts.get("test") '
+                "into the wrapper to enable proper test mode support."
+            )
+            return ret
         if encoding in ("pem", "pkcs7_pem"):
             contents = contents.encode()
         else:
@@ -1512,6 +1518,12 @@ def private_key_managed_ssh(name, result, comment, changes, tempfile=None, **kwa
         return ret
     file_managed_ret = _file_managed(name, replace=False, **kwargs)
     if tempfile is not None:
+        if __opts__["test"]:
+            ret["comment"] += (
+                '. The file was not actually updated - please pass test=opts.get("test") '
+                "into the wrapper to enable proper test mode support."
+            )
+            return ret
         try:
             __salt__["file.move"](tempfile, name)
         except Exception as err:  # pylint: disable=broad-except
