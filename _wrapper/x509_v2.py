@@ -852,7 +852,7 @@ def certificate_managed_wrapper(
                 }
                 if create_private_key or recreate_private_key:
                     pp = "created" if not recreate_private_key else "recreated"
-                    pk_ret["changes"][pp] = name
+                    pk_ret["changes"][pp] = pk_args["name"]
                     pk_ret["comment"] = f"The private key would have been {pp}"
                 ret[pk_args["name"] + "_key"] = {
                     "x509.private_key_managed_ssh": [{k: v} for k, v in pk_ret.items()]
