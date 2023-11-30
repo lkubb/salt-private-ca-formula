@@ -1523,6 +1523,10 @@ def private_key_managed_ssh(name, result, comment, changes, tempfile=None, **kwa
                 '. The file was not actually updated - please pass test=opts.get("test") '
                 "into the wrapper to enable proper test mode support."
             )
+            try:
+                __salt__["file.remove"](tempfile)
+            except Exception:  # pylint: disable=broad-except
+                pass
             return ret
         try:
             __salt__["file.move"](tempfile, name)
