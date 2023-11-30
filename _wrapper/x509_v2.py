@@ -629,6 +629,7 @@ def certificate_managed_wrapper(
     csr=None,
     public_key=None,
     certificate_managed=None,
+    test=False,
 ):
     """
     This function essentially behaves like a sophisticated Jinja macro.
@@ -651,7 +652,8 @@ def certificate_managed_wrapper(
     ``private_key_managed``.
 
     As an example, for Jinja templates, you can serialize this function's output
-    directly into the state file:
+    directly into the state file. Note that you need to pass ``opts.get("test")``
+    explicitly for test mode to work reliably!
 
     .. code-block:: jinja
 
@@ -675,7 +677,8 @@ def certificate_managed_wrapper(
                 ca_server="ca_minion",
                 signing_policy="www",
                 private_key_managed=private_key_params,
-                certificate_managed=certificate_params
+                certificate_managed=certificate_params,
+                test=opts.get("test")
             ) | yaml(false)
         }}
 
@@ -718,6 +721,10 @@ def certificate_managed_wrapper(
 
     certificate_managed
         A dictionary of keyword arguments to ``x509.certificate_managed``.
+
+    test
+        Run in test mode. This needs to be passed explicitly because the value
+        is not loaded into wrapper modules. Pass it like ``test=opts.get("test")``.
 
     .. note::
 
@@ -829,7 +836,7 @@ def certificate_managed_wrapper(
             if new_certificate or (cert_changes and not reencode_certificate):
                 recreate_private_key = True
 
-        if __opts__["test"]:
+        if test:
             if pk_args:
                 pk_ret = {
                     "name": pk_args["name"],
