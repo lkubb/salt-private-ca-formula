@@ -666,7 +666,7 @@ def certificate_managed_wrapper(
                 "basicConstraints": "critical, CA:false",
                 "subjectKeyIdentifier": "hash",
                 "authorityKeyIdentifier": "keyid:always",
-                "subjectAlternativeNamems": ["DNS:my.minion.example.com"],
+                "subjectAltName": ["DNS:my.minion.example.com"],
                 "CN": "my.minion.example.com",
                 "days_remaining": 7,
                 "days_valid": 30
@@ -699,6 +699,7 @@ def certificate_managed_wrapper(
         This is required if ``private_key``, ``csr`` or ``public_key``
         have not been specified.
         Key rotation will be performed automatically if ``new: true``.
+        Note that the specified file path must not be a symlink.
 
     private_key
         The path of a private key to use for public key derivation
@@ -716,8 +717,8 @@ def certificate_managed_wrapper(
 
     public_key
         The path of a public key to use.
-        Does not accept the CSR itself. Mutually exclusive with ``private_key_managed``,
-        ``private_key`` and ``public_key``.
+        Does not accept the key itself. Mutually exclusive with ``private_key_managed``,
+        ``private_key`` and ``csr``.
 
     certificate_managed
         A dictionary of keyword arguments to ``x509.certificate_managed``.
@@ -772,6 +773,7 @@ def certificate_managed_wrapper(
     ret = {}
     current = None
     cert_changes = {}
+    pk_changes = {}
     pk_temp_file = None
 
     try:
@@ -780,19 +782,29 @@ def certificate_managed_wrapper(
             private_key = pk_args["name"]
             if not _check_ret(__salt__["file.file_exists"](private_key)):
                 create_private_key = True
-            else:
-                public_key = _check_ret(
-                    __salt__["x509.get_public_key"](
-                        pk_args["name"],
-                        pk_args.get("passphrase"),
+            elif __salt__["file.is_link"](private_key):
+                if not pk_args.get("overwrite"):
+                    raise CommandExecutionError(
+                        "Specified private key path exists, but is a symlink, "
+                        "which is disallowed. Either specify the target path of "
+                        "the link or pass overwrite: true to force regeneration"
                     )
+                if not (test or __opts__.get("test")):
+                    # The link would be written over anyways by `file.move`, but
+                    # let's remove it here in case that assumption fails
+                    __salt__["file.remove"](private_key)
+                pk_changes["removed_link"] = pk_args["name"]
+                create_private_key = True
+            else:
+                public_key, create_private_key = _load_privkey(
+                    pk_args["name"],
+                    pk_args.get("passphrase"),
+                    pk_args.get("overwrite", False),
                 )
         elif private_key:
             if not _check_ret(__salt__["file.file_exists"](private_key)):
                 raise SaltInvocationError("Specified private key does not exist")
-            public_key = _check_ret(
-                __salt__["x509.get_public_key"](private_key, private_key_passphrase)
-            )
+            public_key, _ = _load_privkey(private_key, private_key_passphrase)
         elif public_key:
             # todo usually can be specified as the key itself
             if not _check_ret(__salt__["file.file_exists"](public_key)):
@@ -815,8 +827,6 @@ def certificate_managed_wrapper(
             signing_policy_contents = get_signing_policy(
                 signing_policy, ca_server=ca_server
             )
-            if "encoding" not in cert_args:
-                raise ValueError(cert_args)
             current, cert_changes, replace, _ = x509util.check_cert_changes(
                 crt,
                 **cert_args,
@@ -852,6 +862,7 @@ def certificate_managed_wrapper(
                 }
                 if create_private_key or recreate_private_key:
                     pp = "created" if not recreate_private_key else "recreated"
+                    pk_ret["changes"] = pk_changes
                     pk_ret["changes"][pp] = pk_args["name"]
                     pk_ret["comment"] = f"The private key would have been {pp}"
                 ret[pk_args["name"] + "_key"] = {
@@ -917,6 +928,7 @@ def certificate_managed_wrapper(
             }
             if create_private_key or recreate_private_key:
                 pp = "created" if not recreate_private_key else "recreated"
+                pk_ret["changes"] = pk_changes
                 pk_ret["changes"][pp] = pk_args["name"]
                 pk_ret["comment"] = f"The private key has been {pp}"
             ret[pk_args["name"] + "_key"] = {
@@ -1012,3 +1024,31 @@ def certificate_managed_wrapper(
 
 def _filter_cert_managed_state_args(kwargs):
     return {k: v for k, v in kwargs.items() if k != "days_remaining"}
+
+
+def _load_privkey(pk, passphrase, overwrite=False):
+    public_key = None
+    create_private_key = False
+    try:
+        public_key = _check_ret(
+            __salt__["x509.get_public_key"](
+                pk,
+                passphrase,
+            )
+        )
+    except CommandExecutionError as err:
+        # All errors currently get mangled into this one.
+        # TODO: Subclass more specific errors to CommandExecutionError
+        # and reraise them in get_public_key
+        if "Could not load key as" in str(err):
+            if not overwrite:
+                raise CommandExecutionError(
+                    "The private key file could not be loaded. This can either mean "
+                    "the file is encrypted and the provided passphrase is wrong "
+                    "or the file is not a private key at all. Either way, you can "
+                    "pass overwrite: true to force regeneration if the file is managed"
+                )
+            create_private_key = True
+        else:
+            raise
+    return public_key, create_private_key

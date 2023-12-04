@@ -1483,7 +1483,7 @@ def certificate_managed_ssh(
 ):
     """
     Helper for the SSH wrapper module.
-    This receives a base64-encoded certificate and dumps the data to the target.
+    This receives a base64/PEM-encoded certificate and dumps the data to the target.
     A ``file.managed`` sub-state run will be performed.
     """
     ret = {"name": name, "result": result, "comment": comment, "changes": changes}
