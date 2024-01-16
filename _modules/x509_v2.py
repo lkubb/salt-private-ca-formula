@@ -134,12 +134,12 @@ Note that when a ``ca_server`` is involved, both peers must use the updated modu
 """
 import base64
 import copy
-import datetime
 import glob
 import logging
 import os.path
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 
 try:
     import cryptography.x509 as cx509
@@ -1302,6 +1302,8 @@ def encode_private_key(
         determined automatically as the best available one.
 
     private_key_passphrase
+        .. versionadded:: 3006.2
+
         If the current ``private_key`` is encrypted, the passphrase to
         decrypt it.
 
@@ -1375,10 +1377,12 @@ def expires(certificate, days=0):
         Defaults to ``0``, which checks for the current time.
     """
     cert = x509util.load_cert(certificate)
-    # dates are encoded in UTC/GMT, they are returned as a naive datetime object
-    return cert.not_valid_after <= datetime.datetime.utcnow() + datetime.timedelta(
-        days=days
-    )
+    try:
+        not_after = cert.not_valid_after_utc
+    except AttributeError:
+        # naive datetime object, release <42 (it's always UTC)
+        not_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
+    return not_after <= datetime.now(tz=timezone.utc) + timedelta(days=days)
 
 
 def expired(certificate):
@@ -1658,6 +1662,13 @@ def read_certificate(certificate):
     cert = x509util.load_cert(certificate)
     key_type = x509util.get_key_type(cert.public_key(), as_string=True)
 
+    try:
+        not_before = cert.not_valid_before_utc
+        not_after = cert.not_valid_after_utc
+    except AttributeError:
+        # naive datetime object, release <42 (it's always UTC)
+        not_before = cert.not_valid_before.replace(tzinfo=timezone.utc)
+        not_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
     ret = {
         "version": cert.version.value + 1,  # 0-indexed
         "key_size": cert.public_key().key_size if key_type in ["ec", "rsa"] else None,
@@ -1673,8 +1684,8 @@ def read_certificate(certificate):
         "issuer": _parse_dn(cert.issuer),
         "issuer_hash": x509util.pretty_hex(_get_name_hash(cert.issuer)),
         "issuer_str": cert.issuer.rfc4514_string(),
-        "not_before": cert.not_valid_before.strftime(x509util.TIME_FMT),
-        "not_after": cert.not_valid_after.strftime(x509util.TIME_FMT),
+        "not_before": not_before.strftime(x509util.TIME_FMT),
+        "not_after": not_after.strftime(x509util.TIME_FMT),
         "public_key": get_public_key(cert),
         "extensions": _parse_extensions(cert.extensions),
     }
@@ -1740,10 +1751,16 @@ def read_crl(crl):
         The certificate revocation list to read.
     """
     crl = x509util.load_crl(crl)
+    try:
+        last_update = crl.last_update_utc
+        next_update = crl.next_update_utc
+    except AttributeError:
+        last_update = crl.last_update.replace(tzinfo=timezone.utc)
+        next_update = crl.next_update.replace(tzinfo=timezone.utc)
     ret = {
         "issuer": _parse_dn(crl.issuer),
-        "last_update": crl.last_update.strftime(x509util.TIME_FMT),
-        "next_update": crl.next_update.strftime(x509util.TIME_FMT),
+        "last_update": last_update.strftime(x509util.TIME_FMT),
+        "next_update": next_update.strftime(x509util.TIME_FMT),
         "revoked_certificates": {},
         "extensions": _parse_extensions(crl.extensions),
     }
@@ -1763,12 +1780,15 @@ def read_crl(crl):
         ret["signature_algorithm"] = crl.signature_algorithm_oid.dotted_string
 
     for revoked in crl:
+        try:
+            revocation_date = revoked.revocation_date_utc
+        except AttributeError:
+            # naive datetime object, release <42 (it's always UTC)
+            revocation_date = revoked.revocation_date.replace(tzinfo=timezone.utc)
         ret["revoked_certificates"].update(
             {
                 x509util.dec2hex(revoked.serial_number).replace(":", ""): {
-                    "revocation_date": revoked.revocation_date.strftime(
-                        x509util.TIME_FMT
-                    ),
+                    "revocation_date": revocation_date.strftime(x509util.TIME_FMT),
                     "extensions": _parse_crl_entry_extensions(revoked.extensions),
                 }
             }
@@ -2202,10 +2222,7 @@ def _parse_crl_entry_extensions(extensions):
 
 def _match_minions(test, minion):
     if "@" in test:
-        # This runner is currently not found in salt master
-        # https://github.com/saltstack/salt/pull/63297
-        # Salt master currently asks the minion if it is allowed to receive
-        # certificates with the signing policy.
+        # This runner is available from 3007.0 onwards.
         match = __salt__["publish.runner"]("match.compound_matches", arg=[test, minion])
         if match is None:
             raise CommandExecutionError(

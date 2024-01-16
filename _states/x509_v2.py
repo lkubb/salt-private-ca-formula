@@ -181,9 +181,9 @@ according to the www policy.
           - x509: /etc/pki/www.key
 """
 import base64
-import datetime
 import logging
 import os.path
+from datetime import datetime, timedelta, timezone
 
 import salt.utils.files
 from salt.exceptions import CommandExecutionError, SaltInvocationError
@@ -848,10 +848,14 @@ def crl_managed(
 
                 if encoding != current_encoding:
                     changes["encoding"] = encoding
+                try:
+                    curr_next_update = current.next_update_utc
+                except AttributeError:
+                    # naive datetime object, release <42 (it's always UTC)
+                    curr_next_update = current.next_update.replace(tzinfo=timezone.utc)
                 if days_remaining and (
-                    current.next_update
-                    < datetime.datetime.utcnow()
-                    + datetime.timedelta(days=days_remaining)
+                    curr_next_update
+                    < datetime.now(tz=timezone.utc) + timedelta(days=days_remaining)
                 ):
                     changes["expiration"] = True
 
