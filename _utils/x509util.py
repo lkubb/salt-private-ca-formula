@@ -613,10 +613,12 @@ def _build_cert_with_policy(
     signing_policy_contents, ca_server=None, signing_private_key=None, **kwargs
 ):
     final_kwargs = copy.deepcopy(kwargs)
+    final_kwargs["signing_private_key"] = signing_private_key
     merge_signing_policy(
         signing_policy_contents,
         final_kwargs,
     )
+    signing_private_key = final_kwargs.pop("signing_private_key")
 
     builder, _, private_key_loaded, signing_cert = build_crt(
         signing_private_key,
